@@ -723,7 +723,10 @@ function renderAdmin(){
   const _caT=document.getElementById('tab-ca');if(_caT)_caT.style.display=isAdmin(S.user?.email)?'flex':'none';
   document.getElementById('astats').innerHTML=`<div class="astat"><div class="astat-l">Arrecadado</div><div class="astat-v">R$ ${rev.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,'.')}</div><div class="astat-s">confirmados</div></div><div class="astat"><div class="astat-l">Aguardando</div><div class="astat-v">${wait}</div><div class="astat-s">p/ aprovar</div></div><div class="astat"><div class="astat-l">Pedidos</div><div class="astat-v">${S.orders.length}</div><div class="astat-s">total</div></div><div class="astat"><div class="astat-l">Usuários</div><div class="astat-v">${S.users.length}</div><div class="astat-s">cadastrados</div></div>`;
   adminTab(curAT,null);
+
+  adminTab(curATab, null);
 }
+
 /* old adminTab removed */
 function appOrd(id){ const o=S.orders.find(x=>x.id===id); if(o){o.status='paid';save();renderAdmin();showNotif('Aprovado! ✅');} }
 function canOrd(id){ if(!confirm('Cancelar?'))return; const o=S.orders.find(x=>x.id===id); if(o){o.status='cancelled';save();renderAdmin();showNotif('Cancelado.');} }
@@ -741,11 +744,87 @@ function fd(d){ return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digi
 function fdt(d){ return fd(d)+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
 function p2(n){ return String(n).padStart(2,'0'); }
 function closeOvl(id){ document.getElementById(id)?.classList.remove('on'); }
+function closeOv(id){ closeOvl(id); }
 function copyTxt(txt,msg){ navigator.clipboard.writeText(txt).then(()=>showNotif(msg||'Copiado!')); }
 function showNotif(msg,err){ const el=document.getElementById('notif'); el.textContent=msg; el.className='notif on'+(err?' err':''); setTimeout(()=>el.classList.remove('on'),3500); }
 
 document.querySelectorAll('.ovl').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('on'); }));
 if(S.user) document.getElementById('auth-lbl').textContent=S.user.name.split(' ')[0];
+
+
+// =========================================
+// ADMIN TAB RENDERERS
+// =========================================
+function renderAdminPedidos(body){
+  if(!body) body=document.getElementById('admin-body');
+  const sm={pending:['b-p','Aguard. Pgto'],waiting:['b-w','Comp. Enviado'],paid:['b-ok','Aprovado'],cancelled:['b-x','Cancelado']};
+  const orders=[...S.orders].sort((a,b)=>b.id-a.id);
+  if(!orders.length){
+    body.innerHTML='<div class="empty"><div class="empty-ico">📦</div>Nenhum pedido ainda.</div>';
+    return;
+  }
+  body.innerHTML=`<div class="twrap"><table>
+    <thead><tr><th>#</th><th>Comprador</th><th>Prêmio</th><th>Números</th><th>Total</th><th>Status</th><th>Ações</th></tr></thead>
+    <tbody>${orders.map(o=>{
+      const[bc,bt]=sm[o.status]||['b-p','?'];
+      return`<tr>
+        <td style="font-weight:800;color:var(--y1)">#${o.id}</td>
+        <td><div style="font-weight:700">${o.userName}</div><div style="font-size:10px;color:var(--text3)">${o.userId}</div></td>
+        <td style="font-size:12px">${o.prizeIcon||''} ${o.prizeName}</td>
+        <td><div style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text2)">${o.numbers.join(', ')}</div></td>
+        <td style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--y1)">R$ ${o.total}</td>
+        <td><span class="badge ${bc}">${bt}</span></td>
+        <td><div style="display:flex;gap:4px">
+          ${o.status==='waiting'?`<button class="btn btn-g btn-sm" onclick="appOrd(${o.id})" title="Aprovar">✓</button>`:''}
+          ${['pending','waiting'].includes(o.status)?`<button class="btn btn-sm" style="background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.25);color:#f87171;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif" onclick="canOrd(${o.id})" title="Cancelar">✕</button>`:''}
+          ${o.comp?`<button class="btn btn-gh btn-sm" onclick="viewComp(${o.id})" title="Ver comprovante">📄</button>`:''}
+        </div></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderAdminPremios(body){
+  if(!body) body=document.getElementById('admin-body');
+  body.innerHTML=S.prizes.map(p=>{
+    const sold=getSold(p.id).length;
+    const rev=S.orders.filter(o=>o.prizeId===p.id&&o.status==='paid').reduce((s,o)=>s+o.total,0);
+    const pct=Math.round(sold/p.total*100);
+    return`<div class="pac">
+      <div class="pac-h">
+        <div class="pac-i"><div class="pac-ico">${p.icon}</div>
+          <div><div class="pac-nm">${p.name}</div><div class="pac-mt">${p.desc} • ${p.total} nºs • R$${p.price}/nº</div></div>
+        </div>
+        <div style="text-align:right"><div style="font-weight:800;color:var(--g1);font-size:14px">R$ ${rev.toFixed(0)}</div><div style="font-size:10px;color:var(--text3)">arrecadado</div></div>
+      </div>
+      <div class="pac-bb"><div class="pac-b" style="width:${pct}%"></div></div>
+      <div class="pac-ft"><span><b>${sold}</b>/${p.total} vendidos</span><span>Sorteio: <b>${fd(new Date(p.drawDate))}</b></span>${p.drawn?`<span style="color:#4ade80">✅ Nº ${p.winner}</span>`:''}</div>
+      <div style="display:flex;gap:5px;margin-top:10px">
+        <button class="btn btn-gh btn-sm" onclick="openEditPrize('${p.id}')">✏️ Editar</button>
+        <button class="btn btn-gh btn-sm" onclick="selDP('${p.id}');showPage('sorteio')">🎲 Sorteio</button>
+        <button class="btn btn-sm" style="background:rgba(255,255,255,.04);border:1px solid var(--border);color:${p.active?'#f87171':'#4ade80'};border-radius:6px;padding:5px 12px;font-size:12px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif" onclick="togP('${p.id}')">${p.active?'⏸ Pausar':'▶ Ativar'}</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderAdminUsuarios(body){
+  if(!body) body=document.getElementById('admin-body');
+  if(!S.users.length){
+    body.innerHTML='<div class="empty"><div class="empty-ico">👥</div>Nenhum usuário cadastrado ainda.</div>';
+    return;
+  }
+  body.innerHTML=`<div class="twrap"><table>
+    <thead><tr><th>Nome</th><th>Email</th><th>WhatsApp</th><th>Cadastro</th><th>Pedidos</th></tr></thead>
+    <tbody>${S.users.map(u=>`<tr>
+      <td style="font-weight:700">${u.name}</td>
+      <td style="font-size:11px;color:var(--text2)">${u.email}</td>
+      <td style="font-size:11px">${u.phone||'—'}</td>
+      <td style="font-size:11px;color:var(--text2)">${fd(new Date(u.createdAt))}</td>
+      <td style="font-weight:800;color:var(--y1)">${S.orders.filter(o=>o.userId===u.email).length}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
 
 // =========================================
 // CO-ADMIN MANAGEMENT
@@ -889,7 +968,7 @@ function confirmNewPass(){
   notif('Senha redefinida com sucesso! Faça login. ✅');
   closeOv('ov-newpass');
   recoveryEmail='';
-  showPg('auth');
+  showPage('auth');
 }
 
 // =========================================
