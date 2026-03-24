@@ -333,8 +333,9 @@ tr:hover td{background:rgba(255,255,255,0.014)}
   <div class="stitle-row">
     <div class="atabs" id="atabs">
       <div class="atab on" onclick="adminTab('pedidos',this)">📦 Pedidos</div>
-      <div class="atab" onclick="adminTab('premios',this)">🏆 Prêmios</div>
+      <div class="atab" onclick="adminTab('premios',this)" id="tab-pr">🏆 Prêmios</div>
       <div class="atab" onclick="adminTab('usuarios',this)">👥 Usuários</div>
+      <div class="atab" id="tab-ca" onclick="adminTab('coadmins',this)">🔐 Co-admins</div>
     </div>
     <div id="atab-act"></div>
   </div>
@@ -399,16 +400,67 @@ tr:hover td{background:rgba(255,255,255,0.014)}
       <button class="btn btn-g btn-sm" id="cv-approve-btn">✓ Aprovar</button>
     </div>
   </div>
+
+<!-- MODAL CO-ADMIN -->
+<div class="ovl" id="ov-coadmin">
+  <div class="modal modal-sm">
+    <button class="mx" onclick="closeOv('ov-coadmin')">✕</button>
+    <h2>🔐 Novo Co-admin</h2>
+    <div class="fg"><label>Nome *</label><input id="ca-name" placeholder="Nome completo"></div>
+    <div class="fg"><label>Email *</label><input id="ca-email" type="email" placeholder="email@exemplo.com"></div>
+    <div style="background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);border-radius:10px;padding:12px;font-size:12px;color:rgba(180,210,255,.85);margin-bottom:4px">
+      💡 O co-admin poderá apenas <b>aprovar e rejeitar pagamentos</b>. Sorteio, prêmios e usuários são exclusivos do admin principal.
+    </div>
+    <div class="mf">
+      <button class="btn btn-gh btn-sm" onclick="closeOv('ov-coadmin')">Cancelar</button>
+      <button class="btn btn-y btn-sm" onclick="saveCoadmin()">Adicionar ✓</button>
+    </div>
+  </div>
 </div>
+
+<!-- MODAL RECUPERAÇÃO DE SENHA -->
+<div class="ovl" id="ov-recovery">
+  <div class="modal modal-sm">
+    <button class="mx" onclick="closeOv('ov-recovery')">✕</button>
+    <h2>🔑 Recuperar Senha</h2>
+    <div id="rec-body">
+      <p style="font-size:13px;color:var(--t2);margin-bottom:16px">Informe seu email. Você receberá um código para redefinir sua senha.</p>
+      <div class="fg"><label>Email *</label><input id="rec-email" type="email" placeholder="seu@email.com"></div>
+      <div class="mf">
+        <button class="btn btn-gh btn-sm" onclick="closeOv('ov-recovery')">Cancelar</button>
+        <button class="btn btn-y btn-sm" onclick="sendRecovery()">Enviar Código</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL REDEFINIR SENHA -->
+<div class="ovl" id="ov-newpass">
+  <div class="modal modal-sm">
+    <button class="mx" onclick="closeOv('ov-newpass')">✕</button>
+    <h2>🔒 Nova Senha</h2>
+    <div class="fg"><label>Código recebido *</label><input id="np-code" placeholder="Ex: 847291" maxlength="6"></div>
+    <div class="fg"><label>Nova Senha *</label><input id="np-pass" type="password" placeholder="Mínimo 6 caracteres"></div>
+    <div class="fg"><label>Confirmar Nova Senha *</label><input id="np-pass2" type="password" placeholder="Repita a senha"></div>
+    <div class="mf">
+      <button class="btn btn-gh btn-sm" onclick="closeOv('ov-newpass')">Cancelar</button>
+      <button class="btn btn-y btn-sm" onclick="confirmNewPass()">Salvar Nova Senha</button>
+    </div>
+  </div>
+</div>
+
 
 <script>
 const ADMIN = ['fabiotm1985','gmail.com'].join('@');
+function isAdmin(e){return e===ADMIN;}
+function isMod(e){try{return S&&S.coadmins&&S.coadmins.some(c=>c.email===e&&c.active);}catch(x){return false;}}
+function hasAdminAccess(e){return isAdmin(e)||isMod(e);}
 let S = load();
 function load(){
-  try{ const r=localStorage.getItem('rifa_v5'); if(r) return JSON.parse(r); }catch(e){}
+  try{ const r=localStorage.getItem('rifa_v6'); if(r) return JSON.parse(r); }catch(e){}
   const dd=new Date('2025-05-09T10:00:00').toISOString();
   const px='66996031792', pn='Liany Adriana Yari Hernandez';
-  return{ user:null,users:[],nextId:1,orders:[],
+  return{ user:null,users:[],nextId:1,orders:[],coadmins:[],recoveryTokens:[],
     prizes:[
       {id:'luva',name:'Luva de Baseball Mizuno Nova',desc:'Preta e Azul — Nova',icon:'🧤',total:500,price:10,drawDate:dd,pixKey:px,pixName:pn,pixType:'Telefone',winner:null,drawn:false,active:true},
       {id:'pb',name:'Power Bank 20000mAh',desc:'Compacto, carregamento rápido — Preto',icon:'⚡',total:100,price:10,drawDate:dd,pixKey:px,pixName:pn,pixType:'Telefone',winner:null,drawn:false,active:true},
@@ -416,7 +468,7 @@ function load(){
     ]
   };
 }
-function save(){ localStorage.setItem('rifa_v5',JSON.stringify(S)); }
+function save(){ localStorage.setItem('rifa_v6',JSON.stringify(S)); }
 
 let AP=S.prizes[0]?.id, sel=[], DP=S.prizes[0]?.id, DT={}, coStep=0, coOId=null;
 
@@ -429,9 +481,9 @@ function showPage(p){
   else if(p==='meus') renderMeus();
   else if(p==='sorteio') renderSorteio();
   else if(p==='auth') renderAuth();
-  else if(p==='admin'){ if(S.user?.email===ADMIN){ renderAdmin(); document.getElementById('admin-em').textContent=ADMIN; } else{ showNotif('Acesso negado',1); showPage('home'); } }
+  else if(p==='admin'){ if(hasAdminAccess(S.user?.email)){ renderAdmin(); document.getElementById('admin-em').textContent=ADMIN; } else{ showNotif('Acesso negado',1); showPage('home'); } }
 }
-window.addEventListener('hashchange',()=>{ if(location.hash==='#admin'&&S.user?.email===ADMIN) showPage('admin'); });
+window.addEventListener('hashchange',()=>{ if(location.hash==='#admin'&&hasAdminAccess(S.user?.email)) showPage('admin'); });
 if(location.hash==='#admin'&&S.user?.email===ADMIN) setTimeout(()=>showPage('admin'),80);
 
 // HOME
@@ -594,7 +646,7 @@ function renderSorteio(){
       <div class="pc-nm">${p.name}</div>
       ${p.drawn&&p.winner?`<div style="color:#4ade80;font-size:11px;font-weight:800;margin-top:4px">✅ Sorteado: Nº ${p.winner}</div>`:`<div style="font-size:10px;color:var(--text2);margin-top:3px">${getSold(p.id).length}/${p.total} confirmados</div>`}
     </div>`).join('');
-  document.getElementById('admin-draw').style.display=S.user?.email===ADMIN?'block':'none';
+  document.getElementById('admin-draw').style.display=isAdmin(S.user?.email)?'block':'none';
   updateDrawMain();
 }
 function selDP(id){ DP=id; renderSorteio(); }
@@ -613,7 +665,7 @@ function updateDrawMain(){
   }
 }
 function realizarSorteio(){
-  if(S.user?.email!==ADMIN){ showNotif('Apenas o admin!',1); return; }
+  if(!isAdmin(S.user?.email)){ showNotif('Apenas o admin!',1); return; }
   const prize=S.prizes.find(p=>p.id===DP); if(!prize||prize.drawn) return;
   const pool=S.orders.filter(o=>o.prizeId===prize.id&&o.status==='paid').flatMap(o=>o.numbers);
   const src=pool.length?pool:Array.from({length:prize.total},(_,i)=>i+1);
@@ -633,7 +685,7 @@ function openAdiar(){
   document.getElementById('ovl-adiar').classList.add('on');
 }
 function confAdiar(){
-  if(S.user?.email!==ADMIN)return;
+  if(!isAdmin(S.user?.email))return;
   const pid=document.getElementById('adiar-p').value, dt=document.getElementById('adiar-dt').value;
   if(!dt){showNotif('Informe a data!',1);return;}
   const p=S.prizes.find(x=>x.id===pid); if(p){p.drawDate=new Date(dt).toISOString();save();closeOvl('ovl-adiar');renderSorteio();showNotif('Adiado!');}
@@ -642,7 +694,7 @@ function confAdiar(){
 // AUTH
 function renderAuth(){
   const el=document.getElementById('auth-body');
-  if(S.user){ el.innerHTML=`<div style="text-align:center;padding:5px 0"><div style="width:54px;height:54px;border-radius:50%;background:rgba(255,214,0,.1);border:2px solid rgba(255,214,0,.22);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:24px">👤</div><div style="font-weight:900;font-size:15px;margin-bottom:2px">${S.user.name}</div><div style="font-size:11px;color:var(--text2);margin-bottom:16px">${S.user.email}</div>${S.user.email===ADMIN?`<button class="btn btn-gh btn-sm btn-full" style="margin-bottom:8px" onclick="showPage('admin')">🔧 Painel Admin</button>`:''}<button class="btn btn-red btn-sm btn-full" onclick="logout()">Sair</button></div>`; return; }
+  if(S.user){ el.innerHTML=`<div style="text-align:center;padding:5px 0"><div style="width:54px;height:54px;border-radius:50%;background:rgba(255,214,0,.1);border:2px solid rgba(255,214,0,.22);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:24px">👤</div><div style="font-weight:900;font-size:15px;margin-bottom:2px">${S.user.name}</div><div style="font-size:11px;color:var(--text2);margin-bottom:16px">${S.user.email}</div>${hasAdminAccess(S.user.email)?`<button class="btn btn-gh btn-sm btn-full" style="margin-bottom:8px" onclick="showPage('admin')">🔧 Painel Admin</button>`:''}<button class="btn btn-red btn-sm btn-full" onclick="logout()">Sair</button></div>`; return; }
   renderAuthForm('login');
 }
 function renderAuthForm(tab){
@@ -654,19 +706,20 @@ function renderAuthForm(tab){
   if(tab==='login'){
     el.innerHTML=`${gBtn}<div class="fg"><label>Email</label><input id="l-em" type="email" placeholder="seu${at}email.com"></div><div class="fg"><label>Senha</label><input id="l-pw" type="password" placeholder="••••••••"></div><button class="btn btn-y btn-sm btn-full" style="margin-top:3px" onclick="doLogin()">Entrar →</button><div style="text-align:center;margin-top:11px;font-size:11px;color:var(--text2)">Sem conta? <a href="#" onclick="renderAuthForm('register');return false" style="color:var(--y1)">Cadastrar</a></div>`;
   } else {
-    el.innerHTML=`${gBtn}<div class="fg"><label>Nome *</label><input id="r-nm" placeholder="Seu nome completo"></div><div class="fg"><label>Email *</label><input id="r-em" type="email" placeholder="seu${at}email.com"></div><div class="fg"><label>WhatsApp</label><input id="r-ph" placeholder="(00) 00000-0000"></div><div class="fg"><label>Senha * (mín. 6 caracteres)</label><input id="r-pw" type="password" placeholder="••••••••"></div><button class="btn btn-y btn-sm btn-full" style="margin-top:3px" onclick="doRegister()">Criar Conta →</button><div style="text-align:center;margin-top:11px;font-size:11px;color:var(--text2)">Já tem? <a href="#" onclick="renderAuthForm('login');return false" style="color:var(--y1)">Entrar</a></div>`;
+    el.innerHTML=`${gBtn}<div class="fg"><label>Nome *</label><input id="r-nm" placeholder="Seu nome completo"></div><div class="fg"><label>Email *</label><input id="r-em" type="email" placeholder="seu${at}email.com"></div><div class="fg"><label>WhatsApp</label><input id="r-ph" placeholder="(00) 00000-0000"></div><div class="fg"><label>Senha * (mín. 6 caracteres)</label><input id="r-pw" type="password" placeholder="••••••••"></div><div class="fg"><label>Confirmar Senha *</label><input id="r-pw2" type="password" placeholder="Repita a senha"></div><button class="btn btn-y btn-sm btn-full" style="margin-top:3px" onclick="doRegister()">Criar Conta →</button><div style="text-align:center;margin-top:11px;font-size:11px;color:var(--text2)">Já tem? <a href="#" onclick="renderAuthForm('login');return false" style="color:var(--y1)">Entrar</a></div>`;
   }
 }
 function googleLogin(){ showNotif('Login Google em breve! Use email.',0); }
 function doLogin(){ const em=document.getElementById('l-em').value.trim(), pw=document.getElementById('l-pw').value; const u=S.users.find(x=>x.email===em&&x.pass===pw); if(!u){showNotif('Email ou senha errados!',1);return;} S.user=u;save();document.getElementById('auth-lbl').textContent=u.name.split(' ')[0];showNotif(`Bem-vindo, ${u.name.split(' ')[0]}! 🎉`);renderAuth(); }
-function doRegister(){ const nm=document.getElementById('r-nm').value.trim(), em=document.getElementById('r-em').value.trim(), ph=document.getElementById('r-ph').value.trim(), pw=document.getElementById('r-pw').value; if(!nm||!em||!pw){showNotif('Preencha os campos!',1);return;} if(pw.length<6){showNotif('Senha: mín. 6 caracteres!',1);return;} if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){showNotif('Email inválido!',1);return;} if(S.users.find(x=>x.email===em)){showNotif('Email já cadastrado!',1);return;} const u={email:em,name:nm,phone:ph,pass:pw,createdAt:new Date().toISOString()}; S.users.push(u);S.user=u;save();document.getElementById('auth-lbl').textContent=nm.split(' ')[0];showNotif(`Bem-vindo, ${nm.split(' ')[0]}! 🎉`);renderAuth(); }
+function doRegister(){ const nm=document.getElementById('r-nm').value.trim(), em=document.getElementById('r-em').value.trim(), ph=document.getElementById('r-ph').value.trim(), pw=document.getElementById('r-pw').value, pw2=document.getElementById('r-pw2')?.value||''; if(!nm||!em||!pw){showNotif('Preencha os campos!',1);return;} if(pw!==pw2){showNotif('As senhas não coincidem!',1);return;} if(pw.length<6){showNotif('Senha: mín. 6 caracteres!',1);return;} if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){showNotif('Email inválido!',1);return;} if(S.users.find(x=>x.email===em)){showNotif('Email já cadastrado!',1);return;} const u={email:em,name:nm,phone:ph,pass:pw,createdAt:new Date().toISOString()}; S.users.push(u);S.user=u;save();document.getElementById('auth-lbl').textContent=nm.split(' ')[0];showNotif(`Bem-vindo, ${nm.split(' ')[0]}! 🎉`);renderAuth(); }
 function logout(){ S.user=null;save();document.getElementById('auth-lbl').textContent='Entrar';showNotif('Até logo!');renderAuth(); }
 
 // ADMIN
 let curAT='pedidos';
 function renderAdmin(){
-  if(S.user?.email!==ADMIN)return;
+  if(!hasAdminAccess(S.user?.email))return;
   const paid=S.orders.filter(o=>o.status==='paid'), rev=paid.reduce((s,o)=>s+o.total,0), wait=S.orders.filter(o=>o.status==='waiting').length;
+  const _caT=document.getElementById('tab-ca');if(_caT)_caT.style.display=isAdmin(S.user?.email)?'flex':'none';
   document.getElementById('astats').innerHTML=`<div class="astat"><div class="astat-l">Arrecadado</div><div class="astat-v">R$ ${rev.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,'.')}</div><div class="astat-s">confirmados</div></div><div class="astat"><div class="astat-l">Aguardando</div><div class="astat-v">${wait}</div><div class="astat-s">p/ aprovar</div></div><div class="astat"><div class="astat-l">Pedidos</div><div class="astat-v">${S.orders.length}</div><div class="astat-s">total</div></div><div class="astat"><div class="astat-l">Usuários</div><div class="astat-v">${S.users.length}</div><div class="astat-s">cadastrados</div></div>`;
   adminTab(curAT,null);
 }
@@ -701,6 +754,157 @@ function showNotif(msg,err){ const el=document.getElementById('notif'); el.textC
 
 document.querySelectorAll('.ovl').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('on'); }));
 if(S.user) document.getElementById('auth-lbl').textContent=S.user.name.split(' ')[0];
+
+// =========================================
+// CO-ADMIN MANAGEMENT
+// =========================================
+function adminTab(tab, el){
+  curATab=tab;
+  document.querySelectorAll('.atab').forEach(t=>t.classList.remove('on'));
+  if(el) el.classList.add('on');
+  // show/hide co-admin tab based on role
+  const caTab=document.getElementById('tab-ca');
+  if(caTab) caTab.style.display=isAdmin(S.user?.email)?'flex':'none';
+
+  const map={'pedidos':'📦 Pedidos','premios':'🏆 Prêmios','usuarios':'👥 Usuários','coadmins':'🔐 Co-admins'};
+  if(!el){ document.querySelectorAll('.atab').forEach(t=>{ if(t.textContent.trim()===map[tab]) t.classList.add('on'); }); }
+  document.getElementById('atab-act').innerHTML=
+    (tab==='premios'&&isAdmin(S.user?.email))?`<button class="btn btn-y btn-sm" onclick="openAddPrize()">➕ Novo Prêmio</button>`:
+    (tab==='coadmins'&&isAdmin(S.user?.email))?`<button class="btn btn-y btn-sm" onclick="openAddCoadmin()">➕ Novo Co-admin</button>`:'';
+
+  const body=document.getElementById('admin-body');
+  if(tab==='pedidos') renderAdminPedidos(body);
+  else if(tab==='premios') renderAdminPremios(body);
+  else if(tab==='usuarios') renderAdminUsuarios(body);
+  else if(tab==='coadmins') renderAdminCoadmins(body);
+}
+
+function renderAdminCoadmins(body){
+  if(!isAdmin(S.user?.email)){body.innerHTML='<div class="empty">Sem permissão</div>';return;}
+  const list=S.coadmins||[];
+  body.innerHTML=`
+    ${list.length===0?`<div class="empty"><div class="empty-ico">🔐</div>Nenhum co-admin cadastrado ainda.<br>Clique em "Novo Co-admin" para adicionar.</div>`:''}
+    ${list.map(c=>`
+    <div class="pac" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:42px;height:42px;border-radius:50%;background:rgba(255,214,0,.12);border:2px solid rgba(255,214,0,.25);display:flex;align-items:center;justify-content:center;font-size:18px">🔐</div>
+        <div>
+          <div style="font-weight:800">${c.name}</div>
+          <div style="font-size:12px;color:var(--t2)">${c.email}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:2px">Adicionado em ${fd(new Date(c.createdAt))}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="badge ${c.active?'bok':'bx'}">${c.active?'Ativo':'Inativo'}</span>
+        <button class="btn btn-sm" style="background:rgba(255,255,255,.05);border:1px solid var(--bdr);color:${c.active?'#ef9a9a':'#69f0ae'};border-radius:8px;padding:6px 12px;font-family:'Nunito',sans-serif;font-size:12px;font-weight:800;cursor:pointer" onclick="togCoadmin('${c.email}')">${c.active?'Desativar':'Ativar'}</button>
+        <button class="btn btn-sm" style="background:rgba(239,68,54,.1);border:1px solid rgba(239,68,54,.28);color:#ef9a9a;border-radius:8px;padding:6px 12px;font-family:'Nunito',sans-serif;font-size:12px;font-weight:800;cursor:pointer" onclick="removeCoadmin('${c.email}')">Remover</button>
+      </div>
+    </div>`).join('')}`;
+}
+
+function openAddCoadmin(){
+  document.getElementById('ca-name').value='';
+  document.getElementById('ca-email').value='';
+  document.getElementById('ov-coadmin').classList.add('on');
+}
+function saveCoadmin(){
+  const name=document.getElementById('ca-name').value.trim();
+  const email=document.getElementById('ca-email').value.trim().toLowerCase();
+  if(!name||!email){notif('Preencha nome e email!',1);return;}
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){notif('Email inválido!',1);return;}
+  if(email===ADMIN){notif('Este email já é o admin principal!',1);return;}
+  if((S.coadmins||[]).find(c=>c.email===email)){notif('Este email já é co-admin!',1);return;}
+  if(!S.coadmins) S.coadmins=[];
+  S.coadmins.push({email,name,active:true,createdAt:new Date().toISOString()});
+  save();closeOv('ov-coadmin');adminTab('coadmins',null);notif(`Co-admin ${name} adicionado! ✅`);
+}
+function togCoadmin(email){
+  const c=(S.coadmins||[]).find(x=>x.email===email);
+  if(c){c.active=!c.active;save();adminTab('coadmins',null);notif(c.active?'Co-admin ativado!':'Co-admin desativado.');}
+}
+function removeCoadmin(email){
+  if(!confirm('Remover este co-admin?'))return;
+  S.coadmins=(S.coadmins||[]).filter(c=>c.email!==email);
+  save();adminTab('coadmins',null);notif('Co-admin removido.');
+}
+
+// =========================================
+// PASSWORD RECOVERY
+// =========================================
+let recoveryEmail='';
+function openRecovery(){
+  document.getElementById('rec-email').value='';
+  document.getElementById('rec-body').innerHTML=`
+    <p style="font-size:13px;color:var(--t2);margin-bottom:16px">Informe seu email cadastrado para receber o código de recuperação.</p>
+    <div class="fg"><label>Email *</label><input id="rec-email" type="email" placeholder="seu@email.com"></div>
+    <div class="mf">
+      <button class="btn btn-gh btn-sm" onclick="closeOv('ov-recovery')">Cancelar</button>
+      <button class="btn btn-y btn-sm" onclick="sendRecovery()">Enviar Código →</button>
+    </div>`;
+  document.getElementById('ov-recovery').classList.add('on');
+}
+function sendRecovery(){
+  const em=document.getElementById('rec-email').value.trim().toLowerCase();
+  if(!em){notif('Informe o email!',1);return;}
+  const user=S.users.find(u=>u.email===em);
+  if(!user){notif('Email não encontrado!',1);return;}
+  // Generate 6-digit code
+  const code=String(Math.floor(100000+Math.random()*900000));
+  const expires=new Date(Date.now()+15*60*1000).toISOString(); // 15 min
+  if(!S.recoveryTokens) S.recoveryTokens=[];
+  // Remove old tokens for this email
+  S.recoveryTokens=S.recoveryTokens.filter(t=>t.email!==em);
+  S.recoveryTokens.push({email:em,code,expires,used:false});
+  save();
+  recoveryEmail=em;
+  // Show code in UI (since we have no email server, we show it here)
+  document.getElementById('rec-body').innerHTML=`
+    <div style="background:rgba(0,200,83,.08);border:1px solid rgba(0,200,83,.25);border-radius:12px;padding:16px;text-align:center;margin-bottom:16px">
+      <div style="font-size:12px;color:var(--t2);margin-bottom:6px;font-weight:700">CÓDIGO DE RECUPERAÇÃO</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:48px;color:var(--g);letter-spacing:6px">${code}</div>
+      <div style="font-size:11px;color:var(--t3);margin-top:4px">Válido por 15 minutos · Anote este código!</div>
+    </div>
+    <div style="font-size:12px;color:var(--t2);margin-bottom:16px;text-align:center">
+      📧 Em um sistema real, este código seria enviado para <b style="color:var(--t)">${em}</b><br>
+      Por enquanto, use o código acima.
+    </div>
+    <div class="mf" style="justify-content:center">
+      <button class="btn btn-y btn-sm" onclick="closeOv('ov-recovery');openNewPass()">Usar Código →</button>
+    </div>`;
+}
+function openNewPass(){
+  document.getElementById('np-code').value='';
+  document.getElementById('np-pass').value='';
+  document.getElementById('np-pass2').value='';
+  document.getElementById('ov-newpass').classList.add('on');
+}
+function confirmNewPass(){
+  const code=document.getElementById('np-code').value.trim();
+  const pw=document.getElementById('np-pass').value;
+  const pw2=document.getElementById('np-pass2').value;
+  if(!code||!pw||!pw2){notif('Preencha todos os campos!',1);return;}
+  if(pw!==pw2){notif('As senhas não coincidem!',1);return;}
+  if(pw.length<6){notif('Senha deve ter no mínimo 6 caracteres!',1);return;}
+  if(!S.recoveryTokens) S.recoveryTokens=[];
+  const token=S.recoveryTokens.find(t=>t.email===recoveryEmail&&t.code===code&&!t.used);
+  if(!token){notif('Código inválido ou expirado!',1);return;}
+  if(new Date()>new Date(token.expires)){notif('Código expirado! Solicite um novo.',1);return;}
+  const user=S.users.find(u=>u.email===recoveryEmail);
+  if(!user){notif('Usuário não encontrado!',1);return;}
+  user.pass=pw;
+  token.used=true;
+  save();
+  notif('Senha redefinida com sucesso! Faça login. ✅');
+  closeOv('ov-newpass');
+  recoveryEmail='';
+  showPg('auth');
+}
+
+// =========================================
+// CONFIRM PASSWORD ON REGISTER (patch doReg)
+// =========================================
+// Patch authForm to add confirm password and recovery link
+
 renderHome();
 </script>
 </body>
