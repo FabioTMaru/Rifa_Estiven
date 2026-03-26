@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Rifa do Estiven — Apoie Nosso Campeão!</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{
   --g:#00c853;--gd:#007a2e;--y:#ffd600;--yd:#b8a000;
@@ -251,6 +252,7 @@ footer{background:rgba(0,0,0,.4);border-top:1px solid var(--border2);padding:28p
 </head>
 <body>
 
+
 <!-- HEADER -->
 <header>
   <div class="hdr">
@@ -484,51 +486,33 @@ footer{background:rgba(0,0,0,.4);border-top:1px solid var(--border2);padding:28p
   </div>
 </div>
 
+
 <script>
 // ════════════════════════════════════════════════
-// CONSTANTS & STATE
+// ⚙️ CONFIGURAÇÃO SUPABASE — EDITE AQUI
+// ════════════════════════════════════════════════
+const SUPA_URL = 'COLE_SUA_URL_AQUI';   // ex: https://abcdefgh.supabase.co
+const SUPA_KEY = 'COLE_SUA_CHAVE_AQUI'; // anon/public key começa com eyJ...
+
+// ════════════════════════════════════════════════
+// CONSTANTES
 // ════════════════════════════════════════════════
 const ADMIN_EMAIL = (function(){ return ['fabiotm1985','gmail.com'].join('@'); })();
-const STORE_KEY = 'rifa_est_v1';
+const { createClient } = supabase;
+const db = createClient(SUPA_URL, SUPA_KEY);
 
-function defaultState(){
-  const dd = new Date('2025-05-09T10:00:00').toISOString();
-  const px = '66996031792', pn = 'Liany Adriana Yari Hernandez', pt = 'Telefone';
-  return {
-    user: null,
-    users: [],
-    orders: [],
-    nextId: 1,
-    prizes: [
-      { id:'luva', name:'Luva de Baseball Mizuno Nova', desc:'Preta e Azul', icon:'🧤', total:500, price:10, drawDate:dd, pixKey:px, pixName:pn, pixType:pt, winner:null, drawn:false, active:true },
-      { id:'pb',   name:'Power Bank 20000mAh', desc:'Compacto, carregamento rápido', icon:'⚡', total:100, price:10, drawDate:dd, pixKey:px, pixName:pn, pixType:pt, winner:null, drawn:false, active:true },
-      { id:'fone', name:'Fone Bluetooth Xiaomi Redmi Buds 8', desc:'Branco', icon:'🎧', total:100, price:10, drawDate:dd, pixKey:px, pixName:pn, pixType:pt, winner:null, drawn:false, active:true }
-    ],
-    coadmins: [{ email:'yariluisana09@gmail.com', name:'Yari Luisana', active:true, createdAt: new Date().toISOString() }],
-    recoveryTokens: []
-  };
+function isAdmin(e){ return e === ADMIN_EMAIL; }
+async function isMod(e){
+  const { data } = await db.from('coadmins').select('email').eq('email',e).eq('ativo',true).single();
+  return !!data;
 }
-
-let S = (function(){
-  try { const r = localStorage.getItem(STORE_KEY); if(r) return JSON.parse(r); } catch(e) {}
-  return defaultState();
-})();
-
-function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
+async function hasAccess(e){ return isAdmin(e) || await isMod(e); }
 
 // ════════════════════════════════════════════════
 // HELPERS
 // ════════════════════════════════════════════════
-function isAdmin(email){ return email === ADMIN_EMAIL; }
-function isMod(email){ return (S.coadmins||[]).some(c => c.email===email && c.active); }
-function hasAccess(email){ return isAdmin(email) || isMod(email); }
-
-function getSold(pid){ return S.orders.filter(o=>o.prizeId===pid&&o.status==='paid').flatMap(o=>o.numbers); }
-function getReserved(pid){ return S.orders.filter(o=>o.prizeId===pid&&['pending','waiting'].includes(o.status)).flatMap(o=>o.numbers); }
-function getMine(pid){ if(!S.user) return []; return S.orders.filter(o=>o.prizeId===pid&&o.userId===S.user.email&&['pending','waiting','paid'].includes(o.status)).flatMap(o=>o.numbers); }
-
-function fd(d){ return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
-function fdt(d){ return fd(d)+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
+function fd(d){ return new Date(d).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+function fdt(d){ return fd(d)+' '+new Date(d).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
 function p2(n){ return String(n).padStart(2,'0'); }
 
 function notify(msg, isErr){
@@ -538,18 +522,31 @@ function notify(msg, isErr){
   clearTimeout(el._t);
   el._t = setTimeout(() => el.classList.remove('show'), 3500);
 }
-
 function closeOvl(id){ document.getElementById(id).classList.remove('show'); }
 function openOvl(id){ document.getElementById(id).classList.add('show'); }
+function copyText(txt, msg){ navigator.clipboard.writeText(txt).then(() => notify(msg||'Copiado!')); }
 
-function copyText(txt, msg){
-  navigator.clipboard.writeText(txt).then(() => notify(msg || 'Copiado!'));
+// Simple password hash (SHA-256 via Web Crypto)
+async function hashPass(pass){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pass));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
+
+// ════════════════════════════════════════════════
+// SESSION (localStorage apenas para sessão atual)
+// ════════════════════════════════════════════════
+let CU = null; // current user
+try { CU = JSON.parse(localStorage.getItem('rifa_session')||'null'); } catch(e){}
+function saveSession(){ localStorage.setItem('rifa_session', JSON.stringify(CU)); }
+function clearSession(){ CU=null; localStorage.removeItem('rifa_session'); }
 
 // ════════════════════════════════════════════════
 // NAVIGATION
 // ════════════════════════════════════════════════
-let drawTimers = {};
+let activePrize = null;
+let selected = [];
+let drawPrize = null;
+let drawTimers = {}; 
 
 function goPage(p){
   document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
@@ -561,91 +558,109 @@ function goPage(p){
   if(p==='meus')    renderMeus();
   if(p==='sorteio') renderSorteio();
   if(p==='auth')    renderAuth();
-  if(p==='admin'){
-    if(hasAccess(S.user?.email)) renderAdmin();
-    else { notify('Acesso negado', 1); goPage('home'); }
-  }
+  if(p==='admin')   checkAndLoadAdmin();
 }
 
-// hash admin access
-window.addEventListener('hashchange', () => {
-  if(location.hash==='#admin' && hasAccess(S.user?.email)) goPage('admin');
-});
-if(location.hash==='#admin' && hasAccess(S.user?.email)) setTimeout(()=>goPage('admin'),50);
+async function checkAndLoadAdmin(){
+  if(!CU){ notify('Faça login primeiro!',1); goPage('auth'); return; }
+  const ok = await hasAccess(CU.email);
+  if(ok) renderAdmin();
+  else { notify('Acesso negado',1); goPage('home'); }
+}
 
-// close modal on overlay click
-document.querySelectorAll('.ovl').forEach(o => o.addEventListener('click', e => { if(e.target===o) o.classList.remove('show'); }));
+window.addEventListener('hashchange', () => {
+  if(location.hash==='#admin') checkAndLoadAdmin();
+});
+if(location.hash==='#admin') setTimeout(()=>checkAndLoadAdmin(),100);
+
+document.querySelectorAll('.ovl').forEach(o => o.addEventListener('click', e => {
+  if(e.target===o) o.classList.remove('show');
+}));
 
 // ════════════════════════════════════════════════
 // HOME
 // ════════════════════════════════════════════════
-let activePrize = S.prizes[0]?.id;
-let selected = [];
-
-function renderHome(){
-  renderBannerStats();
-  renderPrizeProgress();
-  renderPrizeTabs();
+async function renderHome(){
+  await renderPrizeProgress();
+  await renderPrizeTabs();
   renderGrid();
 }
 
-function renderBannerStats(){
-  const total = S.prizes.filter(p=>p.active).reduce((s,p)=>s+p.total,0);
-  const sold  = S.prizes.filter(p=>p.active).reduce((s,p)=>s+getSold(p.id).length,0);
-  const np    = S.prizes.filter(p=>p.active).length;
-  document.getElementById('b-stats').innerHTML = `
-    <div class="bstat"><div class="bstat-n">${np}</div><div class="bstat-l">Prêmios</div></div>
-    <div class="bstat"><div class="bstat-n">${total}</div><div class="bstat-l">Números</div></div>
-    <div class="bstat"><div class="bstat-n">${sold}</div><div class="bstat-l">Vendidos</div></div>`;
-}
+async function renderPrizeProgress(){
+  const { data: prizes } = await db.from('premios').select('*').eq('ativo',true).order('criado_em');
+  if(!prizes||!prizes.length) return;
+  if(!activePrize) activePrize = prizes[0].id;
+  if(!drawPrize) drawPrize = prizes[0].id;
 
-function renderPrizeProgress(){
-  document.getElementById('prize-progress').innerHTML = S.prizes.filter(p=>p.active).map(p => {
-    const sold = getSold(p.id).length;
+  // Count sold per prize
+  const { data: pedidos } = await db.from('pedidos').select('premio_id,numeros,status');
+
+  const el = document.getElementById('prize-progress');
+  el.innerHTML = prizes.map(p => {
+    const soldNums = (pedidos||[]).filter(o=>o.premio_id===p.id&&o.status==='paid').flatMap(o=>o.numeros);
+    const sold = soldNums.length;
     const pct  = Math.round(sold/p.total*100);
     return `<div class="pp">
       <div class="pp-top">
         <div class="pp-left">
-          <div class="pp-ico">${p.icon}</div>
-          <div><div class="pp-name">${p.name}</div><div class="pp-desc">${p.desc}</div></div>
+          <div class="pp-ico">${p.icone}</div>
+          <div><div class="pp-name">${p.nome}</div><div class="pp-desc">${p.descricao}</div></div>
         </div>
-        <div><div class="pp-price">R$${p.price}<small>/nº</small></div>${p.drawn&&p.winner?`<div style="font-size:11px;color:#4ade80;text-align:right">✅ Nº ${p.winner}</div>`:''}</div>
+        <div><div class="pp-price">R$${p.preco}<small>/nº</small></div>${p.sorteado&&p.vencedor?`<div style="font-size:11px;color:#4ade80;text-align:right">✅ Nº ${p.vencedor}</div>`:''}</div>
       </div>
       <div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div>
-      <div class="pp-foot"><span><b>${sold}</b> vendidos</span><span><b>${p.total-sold}</b> disponíveis</span><span><b>${pct}%</b></span><span class="pp-draw">🗓️ ${fd(new Date(p.drawDate))}</span></div>
+      <div class="pp-foot"><span><b>${sold}</b> vendidos</span><span><b>${p.total-sold}</b> disponíveis</span><span><b>${pct}%</b></span><span class="pp-draw">🗓️ ${fd(p.data_sorteio)}</span></div>
     </div>`;
   }).join('');
+
+  // Banner stats
+  const totalN = prizes.reduce((s,p)=>s+p.total,0);
+  const totalS = (pedidos||[]).filter(o=>o.status==='paid').flatMap(o=>o.numeros).length;
+  document.getElementById('b-stats').innerHTML = `
+    <div class="bstat"><div class="bstat-n">${prizes.length}</div><div class="bstat-l">Prêmios</div></div>
+    <div class="bstat"><div class="bstat-n">${totalN}</div><div class="bstat-l">Números</div></div>
+    <div class="bstat"><div class="bstat-n">${totalS}</div><div class="bstat-l">Vendidos</div></div>`;
 }
 
-function renderPrizeTabs(){
-  document.getElementById('ptabs').innerHTML = S.prizes.filter(p=>p.active).map(p => {
-    const sold = getSold(p.id).length;
+async function renderPrizeTabs(){
+  const { data: prizes } = await db.from('premios').select('*').eq('ativo',true).order('criado_em');
+  if(!prizes) return;
+  const { data: pedidos } = await db.from('pedidos').select('premio_id,numeros,status');
+  document.getElementById('ptabs').innerHTML = prizes.map(p => {
+    const sold = (pedidos||[]).filter(o=>o.premio_id===p.id&&o.status==='paid').flatMap(o=>o.numeros).length;
     return `<div class="ptab${p.id===activePrize?' active':''}" onclick="selectPrize('${p.id}')">
-      <div class="ptab-ico">${p.icon}</div>
-      <div class="ptab-name">${p.name}</div>
+      <div class="ptab-ico">${p.icone}</div>
+      <div class="ptab-name">${p.nome}</div>
       <div class="ptab-sold">${sold}/${p.total}</div>
-      <div class="ptab-date">🗓️ ${fd(new Date(p.drawDate))}</div>
+      <div class="ptab-date">🗓️ ${fd(p.data_sorteio)}</div>
     </div>`;
   }).join('');
 }
 
-function selectPrize(id){ activePrize=id; selected=[]; renderPrizeTabs(); renderGrid(); updateCart(); }
+async function selectPrize(id){ activePrize=id; selected=[]; await renderPrizeTabs(); await renderGrid(); updateCart(); }
 
-function renderGrid(){
-  const prize = S.prizes.find(p=>p.id===activePrize);
+async function renderGrid(){
+  if(!activePrize) return;
+  const { data: prize } = await db.from('premios').select('*').eq('id',activePrize).single();
   if(!prize) return;
-  const sold = getSold(prize.id), res = getReserved(prize.id), mine = getMine(prize.id);
+
+  const { data: pedidos } = await db.from('pedidos').select('numeros,status,usuario_email').eq('premio_id',activePrize);
+
+  const sold     = (pedidos||[]).filter(o=>o.status==='paid').flatMap(o=>o.numeros);
+  const reserved = (pedidos||[]).filter(o=>['pending','waiting'].includes(o.status)).flatMap(o=>o.numeros);
+  const mine     = CU ? (pedidos||[]).filter(o=>o.usuario_email===CU.email&&['pending','waiting','paid'].includes(o.status)).flatMap(o=>o.numeros) : [];
+
   const g = document.getElementById('ngrid');
   g.innerHTML = '';
   for(let i=1; i<=prize.total; i++){
     const btn = document.createElement('button');
     btn.className = 'nb';
     btn.textContent = i;
-    if(sold.includes(i))       { btn.classList.add('sold'); }
-    else if(res.includes(i))   { btn.classList.add('reserved'); }
-    else if(mine.includes(i))  { btn.classList.add('mine'); }
-    else if(selected.includes(i)){ btn.classList.add('sel'); btn.onclick = ()=>toggleNum(i); }
-    else                       { btn.onclick = ()=>toggleNum(i); }
+    if(sold.includes(i))       btn.classList.add('sold');
+    else if(reserved.includes(i)) btn.classList.add('reserved');
+    else if(mine.includes(i))  btn.classList.add('mine');
+    else if(selected.includes(i)){ btn.classList.add('sel'); btn.onclick=()=>toggleNum(i); }
+    else btn.onclick=()=>toggleNum(i);
     g.appendChild(btn);
   }
 }
@@ -655,54 +670,67 @@ function toggleNum(n){
   renderGrid(); updateCart();
 }
 
-function updateCart(){
-  const prize = S.prizes.find(p=>p.id===activePrize);
+async function updateCart(){
+  const { data: prize } = await db.from('premios').select('*').eq('id',activePrize).single();
   const bar = document.getElementById('cart-bar');
-  if(!selected.length || !prize){ bar.classList.remove('show'); return; }
+  if(!selected.length||!prize){ bar.classList.remove('show'); return; }
   bar.classList.add('show');
-  document.getElementById('cart-nums').textContent = `${selected.length} número${selected.length>1?'s':''} — ${prize.icon} ${prize.name}`;
-  document.getElementById('cart-val').textContent  = `R$ ${(selected.length*prize.price).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,'.')}`;
+  document.getElementById('cart-nums').textContent = `${selected.length} número${selected.length>1?'s':''} — ${prize.icone} ${prize.nome}`;
+  document.getElementById('cart-val').textContent  = `R$ ${(selected.length*prize.preco).toFixed(0)}`;
 }
 
 function clearCart(){ selected=[]; renderGrid(); updateCart(); }
 
 // ════════════════════════════════════════════════
-// CHECKOUT (3 steps)
+// CHECKOUT
 // ════════════════════════════════════════════════
 let coStep=0, coOrderId=null;
 
-function openCheckout(){
-  if(!S.user){ notify('Faça login primeiro!',1); goPage('auth'); return; }
-  const prize = S.prizes.find(p=>p.id===activePrize);
+async function openCheckout(){
+  if(!CU){ notify('Faça login primeiro!',1); goPage('auth'); return; }
+  const { data: prize } = await db.from('premios').select('*').eq('id',activePrize).single();
   if(!prize||!selected.length) return;
   coStep=0; coOrderId=null;
-  renderCoStep();
+  await renderCoStep(prize);
   openOvl('ovl-checkout');
 }
 
-function renderCoStep(){
+async function renderCoStep(prize){
+  if(!prize){
+    const { data } = await db.from('premios').select('*').eq('id',activePrize).single();
+    prize = data;
+  }
+  let order = null;
+  if(coOrderId){
+    const { data } = await db.from('pedidos').select('*').eq('id',coOrderId).single();
+    order = data;
+    if(order && !prize) {
+      const { data: p2 } = await db.from('premios').select('*').eq('id',order.premio_id).single();
+      prize = p2;
+    }
+  }
+
   document.querySelectorAll('#co-steps .step').forEach((s,i)=>{
     s.classList.remove('act','done');
     if(i<coStep) s.classList.add('done');
     else if(i===coStep) s.classList.add('act');
   });
-  const prize = S.prizes.find(p=>p.id===activePrize) || S.prizes.find(p=>p.id===S.orders.find(o=>o.id===coOrderId)?.prizeId);
-  const order = coOrderId ? S.orders.find(o=>o.id===coOrderId) : null;
-  const nums  = order ? order.numbers : [...selected].sort((a,b)=>a-b);
-  const total = order ? order.total : nums.length*(prize?.price||10);
+
+  const nums  = order ? order.numeros : [...selected].sort((a,b)=>a-b);
+  const total = order ? order.total   : nums.length*(prize?.preco||10);
   const body  = document.getElementById('co-body');
 
   if(coStep===0){
     body.innerHTML = `
       <div style="background:rgba(255,255,255,.04);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:12px">
         <div style="font-size:11px;font-weight:800;color:var(--t2);margin-bottom:2px">COMPRADOR</div>
-        <div style="font-weight:800">${S.user.name}</div>
-        <div style="font-size:12px;color:var(--t2)">${S.user.email}${S.user.phone?' · '+S.user.phone:''}</div>
+        <div style="font-weight:800">${CU.nome}</div>
+        <div style="font-size:12px;color:var(--t2)">${CU.email}${CU.telefone?' · '+CU.telefone:''}</div>
       </div>
       <div style="background:rgba(255,255,255,.04);border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:12px">
         <div style="font-size:11px;font-weight:800;color:var(--t2);margin-bottom:4px">PRÊMIO</div>
-        <div style="font-weight:800;font-size:15px">${prize?.icon} ${prize?.name}</div>
-        <div style="font-size:12px;color:var(--t2)">${prize?.desc}</div>
+        <div style="font-weight:800;font-size:15px">${prize?.icone} ${prize?.nome}</div>
+        <div style="font-size:12px;color:var(--t2)">${prize?.descricao}</div>
       </div>
       <div style="margin-bottom:14px">
         <div style="font-size:11px;font-weight:800;color:var(--t2);margin-bottom:8px">NÚMEROS (${nums.length})</div>
@@ -715,16 +743,15 @@ function renderCoStep(){
       <div class="mf"><button class="btn btn-gh btn-sm" onclick="closeOvl('ovl-checkout')">Cancelar</button><button class="btn btn-y btn-sm" onclick="coStep=1;renderCoStep()">Continuar → PIX</button></div>`;
   }
   else if(coStep===1){
-    const p = prize;
     body.innerHTML = `
-      <div style="font-size:13px;color:var(--t2);margin-bottom:4px;line-height:1.6">Realize o PIX abaixo e clique em <b style="color:var(--t)">Já Paguei</b> para reservar seus números.</div>
+      <div style="font-size:13px;color:var(--t2);margin-bottom:4px;line-height:1.6">Realize o PIX e clique em <b style="color:var(--t)">Já Paguei</b> para reservar seus números.</div>
       <div class="pix-box">
-        <div class="pix-lbl">Chave ${p?.pixType}</div>
-        <div class="pix-key">${p?.pixKey}</div>
-        <div class="pix-name">${p?.pixName}</div>
+        <div class="pix-lbl">Chave ${prize?.pix_tipo}</div>
+        <div class="pix-key">${prize?.pix_chave}</div>
+        <div class="pix-name">${prize?.pix_nome}</div>
         <div class="pix-amt">R$ ${total.toFixed(2).replace('.',',')}</div>
-        <div style="font-size:11px;color:var(--t3)">Coloque seu nome na descrição do PIX</div>
-        <button class="cpbtn" onclick="copyText('${p?.pixKey}','Chave PIX copiada! ✓')">📋 Copiar Chave</button>
+        <div style="font-size:11px;color:var(--t3)">Coloque seu nome na descrição</div>
+        <button class="cpbtn" onclick="copyText('${prize?.pix_chave}','Chave PIX copiada! ✓')">📋 Copiar Chave</button>
       </div>
       <div style="background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);border-radius:10px;padding:12px;font-size:12px;color:rgba(180,210,255,.9)">
         💡 Seus números ficam <b>reservados</b> ao clicar em "Já Paguei" e <b>confirmados</b> após aprovação.
@@ -738,8 +765,8 @@ function renderCoStep(){
         <div style="font-size:12px;color:var(--t2)">Envie o comprovante para confirmarmos seu pagamento.</div>
       </div>
       <div class="fg"><label>ID / Código do Comprovante PIX *</label><input id="comp-txid" placeholder="Ex: E00038166202505090000..."><div class="fg-hint">Disponível no app do banco após o PIX</div></div>
-      <div class="fg"><label>Seu banco / chave utilizada</label><input id="comp-from" placeholder="Ex: Nubank — (66) 99603-1792"></div>
-      <div class="fg"><label>Observação (opcional)</label><textarea id="comp-obs" placeholder="Alguma informação adicional..."></textarea></div>
+      <div class="fg"><label>Banco / chave utilizada</label><input id="comp-from" placeholder="Ex: Nubank — (66) 99603-1792"></div>
+      <div class="fg"><label>Observação (opcional)</label><textarea id="comp-obs" placeholder="Alguma info adicional..."></textarea></div>
       <div class="mf">
         <button class="btn btn-gh btn-sm" onclick="closeOvl('ovl-checkout');goPage('meus')">Ver meus números</button>
         <button class="btn btn-y btn-sm" onclick="enviarComprovante()">Enviar Comprovante 📤</button>
@@ -747,56 +774,63 @@ function renderCoStep(){
   }
 }
 
-function reservarNumeros(){
-  const prize = S.prizes.find(p=>p.id===activePrize);
+async function reservarNumeros(){
+  const { data: prize } = await db.from('premios').select('*').eq('id',activePrize).single();
   if(!prize) return;
-  const conflict = selected.filter(n=>getSold(prize.id).includes(n)||getReserved(prize.id).includes(n));
+  // Check conflicts
+  const { data: existing } = await db.from('pedidos').select('numeros,status').eq('premio_id',activePrize);
+  const taken = (existing||[]).filter(o=>['pending','waiting','paid'].includes(o.status)).flatMap(o=>o.numeros);
+  const conflict = selected.filter(n=>taken.includes(n));
   if(conflict.length){ notify(`Números ${conflict.slice(0,3).join(', ')} já reservados!`,1); closeOvl('ovl-checkout'); return; }
-  const o = {
-    id:S.nextId++, userId:S.user.email, userName:S.user.name,
-    prizeId:prize.id, prizeName:prize.name, prizeIcon:prize.icon,
-    numbers:[...selected].sort((a,b)=>a-b), total:selected.length*prize.price,
-    status:'pending', createdAt:new Date().toISOString(), comp:null
-  };
-  S.orders.push(o); save();
-  coOrderId=o.id; selected=[]; renderGrid(); updateCart();
+
+  const { data: novo, error } = await db.from('pedidos').insert({
+    usuario_id: CU.id,
+    usuario_nome: CU.nome,
+    usuario_email: CU.email,
+    premio_id: prize.id,
+    premio_nome: prize.nome,
+    premio_icone: prize.icone,
+    numeros: [...selected].sort((a,b)=>a-b),
+    total: selected.length * prize.preco,
+    status: 'pending'
+  }).select().single();
+
+  if(error){ notify('Erro ao reservar: '+error.message,1); return; }
+  coOrderId = novo.id;
+  selected=[]; renderGrid(); updateCart();
   coStep=2; renderCoStep();
 }
 
-function enviarComprovante(){
+async function enviarComprovante(){
   const txid = document.getElementById('comp-txid')?.value.trim();
   if(!txid){ notify('Informe o ID do comprovante!',1); return; }
-  const o = S.orders.find(x=>x.id===coOrderId);
-  if(o){
-    o.comp = { txid, from:document.getElementById('comp-from')?.value.trim(), obs:document.getElementById('comp-obs')?.value.trim(), at:new Date().toISOString() };
-    o.status='waiting'; save();
-    notify('Comprovante enviado! Aguarde aprovação 🎉');
-    closeOvl('ovl-checkout');
-    renderHome();
-  }
+  const comp = { txid, from:document.getElementById('comp-from')?.value.trim(), obs:document.getElementById('comp-obs')?.value.trim(), at:new Date().toISOString() };
+  const { error } = await db.from('pedidos').update({ status:'waiting', comprovante:comp }).eq('id',coOrderId);
+  if(error){ notify('Erro: '+error.message,1); return; }
+  notify('Comprovante enviado! Aguarde aprovação 🎉');
+  closeOvl('ovl-checkout');
+  renderHome();
 }
 
 // ════════════════════════════════════════════════
 // MEUS NÚMEROS
 // ════════════════════════════════════════════════
-function renderMeus(){
+async function renderMeus(){
   const el = document.getElementById('meus-body');
-  if(!S.user){ el.innerHTML=`<div class="empty"><div class="empty-ico">🔒</div>Faça login para ver seus números<br><br><button class="btn btn-y btn-sm" onclick="goPage('auth')">Entrar</button></div>`; return; }
-  const orders = S.orders.filter(o=>o.userId===S.user.email).sort((a,b)=>b.id-a.id);
-  if(!orders.length){ el.innerHTML=`<div class="empty"><div class="empty-ico">🎟️</div>Nenhuma compra ainda.<br><br><button class="btn btn-y btn-sm" onclick="goPage('home')">Ver Rifas</button></div>`; return; }
+  if(!CU){ el.innerHTML=`<div class="empty"><div class="empty-ico">🔒</div>Faça login para ver seus números<br><br><button class="btn btn-y btn-sm" onclick="goPage('auth')">Entrar</button></div>`; return; }
+  const { data: orders } = await db.from('pedidos').select('*').eq('usuario_email',CU.email).order('id',{ascending:false});
+  if(!orders?.length){ el.innerHTML=`<div class="empty"><div class="empty-ico">🎟️</div>Nenhuma compra ainda.<br><br><button class="btn btn-y btn-sm" onclick="goPage('home')">Ver Rifas</button></div>`; return; }
   const sm = {pending:['b-p','Aguard. Pagamento'],waiting:['b-w','Comp. Enviado'],paid:['b-ok','Confirmado ✓'],cancelled:['b-x','Cancelado']};
   el.innerHTML = orders.map(o=>{
-    const p = S.prizes.find(x=>x.id===o.prizeId);
     const [bc,bt] = sm[o.status]||['b-p','Pendente'];
-    const won = p?.drawn && p?.winner && o.numbers.includes(p.winner) && o.status==='paid';
     return `<div class="ticket t-${o.status}">
       <div class="t-head">
-        <div><div class="t-title">${o.prizeIcon} ${o.prizeName}</div><div class="t-sub">Pedido #${o.id} · ${fdt(new Date(o.createdAt))}</div></div>
-        ${won?'<span class="badge b-win">🏆 VENCEDOR!</span>':`<span class="badge ${bc}">${bt}</span>`}
+        <div><div class="t-title">${o.premio_icone} ${o.premio_nome}</div><div class="t-sub">Pedido #${o.id} · ${fdt(o.criado_em)}</div></div>
+        <span class="badge ${bc}">${bt}</span>
       </div>
-      <div class="t-nums">${o.numbers.map(n=>`<span class="t-num">${n}</span>`).join('')}</div>
+      <div class="t-nums">${o.numeros.map(n=>`<span class="t-num">${n}</span>`).join('')}</div>
       <div class="t-foot">
-        <span class="t-total">R$ ${o.total.toFixed(2).replace('.',',')}</span>
+        <span class="t-total">R$ ${parseFloat(o.total).toFixed(2).replace('.',',')}</span>
         ${o.status==='pending'?`<button class="btn btn-y btn-sm" onclick="reabrirCheckout(${o.id})">📤 Enviar Comprovante</button>`:''}
         ${o.status==='waiting'?`<span style="font-size:12px;color:var(--t2)">⏳ Aguardando aprovação</span>`:''}
       </div>
@@ -804,87 +838,100 @@ function renderMeus(){
   }).join('');
 }
 
-function reabrirCheckout(id){
-  const o = S.orders.find(x=>x.id===id);
+async function reabrirCheckout(id){
+  const { data: o } = await db.from('pedidos').select('*').eq('id',id).single();
   if(!o) return;
-  activePrize=o.prizeId; coOrderId=id; coStep=2;
-  renderCoStep();
+  activePrize=o.premio_id; coOrderId=id; coStep=2;
+  await renderCoStep();
   openOvl('ovl-checkout');
 }
 
 // ════════════════════════════════════════════════
 // SORTEIO
 // ════════════════════════════════════════════════
-let drawPrize = S.prizes[0]?.id;
+async function renderSorteio(){
+  const { data: prizes } = await db.from('premios').select('*').eq('ativo',true).order('criado_em');
+  if(!prizes) return;
+  if(!drawPrize) drawPrize = prizes[0]?.id;
 
-function renderSorteio(){
-  document.getElementById('draw-ptabs').innerHTML = S.prizes.filter(p=>p.active).map(p=>`
+  document.getElementById('draw-ptabs').innerHTML = prizes.map(p=>`
     <div class="ptab${p.id===drawPrize?' active':''}" onclick="selectDrawPrize('${p.id}')">
-      <div class="ptab-ico">${p.icon}</div><div class="ptab-name">${p.name}</div>
-      <div class="ptab-date">🗓️ ${fd(new Date(p.drawDate))}</div>
+      <div class="ptab-ico">${p.icone}</div><div class="ptab-name">${p.nome}</div>
+      <div class="ptab-date">🗓️ ${fd(p.data_sorteio)}</div>
     </div>`).join('');
-  document.getElementById('admin-draw-ctrl').style.display = isAdmin(S.user?.email) ? 'block' : 'none';
-  updateDrawMain();
+
+  document.getElementById('admin-draw-ctrl').style.display = isAdmin(CU?.email) ? 'block' : 'none';
+  await updateDrawMain();
 }
 
 function selectDrawPrize(id){ drawPrize=id; renderSorteio(); }
 
-function updateDrawMain(){
-  const prize = S.prizes.find(p=>p.id===drawPrize)||S.prizes[0];
+async function updateDrawMain(){
+  const { data: prize } = await db.from('premios').select('*').eq('id',drawPrize).single();
   if(!prize) return;
   const el = document.getElementById('draw-main');
-  if(prize.drawn && prize.winner){
-    el.innerHTML=`<div class="draw-pname">${prize.icon} ${prize.name}</div><div class="winner-num">${prize.winner}</div><div style="font-size:16px;font-weight:800;color:#4ade80;margin-top:10px">🏆 Número Sorteado!</div><div style="margin-top:8px;font-size:13px;color:var(--t2)">Realizado em ${fdt(new Date(prize.drawDate))}</div>`;
+  if(prize.sorteado && prize.vencedor){
+    el.innerHTML=`<div class="draw-pname">${prize.icone} ${prize.nome}</div><div class="winner-num">${prize.vencedor}</div><div style="font-size:16px;font-weight:800;color:#4ade80;margin-top:10px">🏆 Número Sorteado!</div>`;
     return;
   }
-  const diff = new Date(prize.drawDate)-new Date();
+  const diff = new Date(prize.data_sorteio)-new Date();
   if(diff>0){
     if(drawTimers[prize.id]) clearInterval(drawTimers[prize.id]);
-    el.innerHTML=`<div class="draw-pname">${prize.icon} ${prize.name}</div><div class="draw-cd" id="cd-${prize.id}">--:--:--</div><div class="draw-sub">para o sorteio em ${fd(new Date(prize.drawDate))} às ${new Date(prize.drawDate).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div>`;
+    el.innerHTML=`<div class="draw-pname">${prize.icone} ${prize.nome}</div><div class="draw-cd" id="cd-${prize.id}">--:--:--</div><div class="draw-sub">para o sorteio em ${fd(prize.data_sorteio)} às ${new Date(prize.data_sorteio).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div>`;
     const tick=()=>{
-      const rem=new Date(prize.drawDate)-new Date();
+      const rem=new Date(prize.data_sorteio)-new Date();
       const cel=document.getElementById('cd-'+prize.id);
       if(!cel){clearInterval(drawTimers[prize.id]);return;}
-      if(rem<=0){cel.textContent='00:00:00';clearInterval(drawTimers[prize.id]);if(isAdmin(S.user?.email))doSorteio();return;}
+      if(rem<=0){cel.textContent='00:00:00';clearInterval(drawTimers[prize.id]);if(isAdmin(CU?.email))doSorteio();return;}
       const h=Math.floor(rem/3600000),m=Math.floor(rem%3600000/60000),s=Math.floor(rem%60000/1000);
       cel.textContent=`${p2(h)}:${p2(m)}:${p2(s)}`;
     };
     tick(); drawTimers[prize.id]=setInterval(tick,1000);
   } else {
-    el.innerHTML=`<div class="draw-pname">${prize.icon} ${prize.name}</div><div style="color:var(--y);font-weight:800;font-size:16px;margin-bottom:14px">⏰ Hora do Sorteio!</div><div class="wheel" id="wheel-${prize.id}" onclick="doSorteio()">🎲</div><div style="font-size:13px;color:var(--t2);margin-top:10px">Clique para realizar o sorteio</div>`;
+    el.innerHTML=`<div class="draw-pname">${prize.icone} ${prize.nome}</div><div style="color:var(--y);font-weight:800;font-size:16px;margin-bottom:14px">⏰ Hora do Sorteio!</div><div class="wheel" id="wheel-${prize.id}" onclick="doSorteio()">🎲</div><div style="font-size:13px;color:var(--t2);margin-top:10px">Clique para realizar o sorteio</div>`;
   }
 }
 
-function doSorteio(){
-  if(!isAdmin(S.user?.email)){ notify('Apenas o admin principal pode sortear!',1); return; }
-  const prize = S.prizes.find(p=>p.id===drawPrize);
-  if(!prize||prize.drawn) return;
-  const pool = S.orders.filter(o=>o.prizeId===prize.id&&o.status==='paid').flatMap(o=>o.numbers);
+async function doSorteio(){
+  if(!isAdmin(CU?.email)){ notify('Apenas o admin pode sortear!',1); return; }
+  const { data: prize } = await db.from('premios').select('*').eq('id',drawPrize).single();
+  if(!prize||prize.sorteado) return;
+  const { data: pedidos } = await db.from('pedidos').select('numeros').eq('premio_id',prize.id).eq('status','paid');
+  const pool = (pedidos||[]).flatMap(o=>o.numeros);
   const src  = pool.length ? pool : Array.from({length:prize.total},(_,i)=>i+1);
   const winner = src[Math.floor(Math.random()*src.length)];
   const wh = document.getElementById('wheel-'+prize.id);
-  if(wh){ wh.classList.add('spinning'); setTimeout(()=>finishSorteio(prize,winner),3100); }
-  else   finishSorteio(prize,winner);
+  if(wh){ wh.classList.add('spinning'); setTimeout(()=>finishSorteio(prize.id,winner),3100); }
+  else finishSorteio(prize.id,winner);
 }
 
-function finishSorteio(prize,winner){ prize.winner=winner; prize.drawn=true; save(); renderSorteio(); notify('🎉 Sorteado! Número '+winner); }
-function resetSorteio(){ if(!confirm('Resetar sorteio deste prêmio?'))return; const p=S.prizes.find(x=>x.id===drawPrize); if(p){p.winner=null;p.drawn=false;save();renderSorteio();} }
+async function finishSorteio(id, winner){
+  await db.from('premios').update({vencedor:winner,sorteado:true}).eq('id',id);
+  renderSorteio(); notify('🎉 Sorteado! Número '+winner);
+}
 
-function openAdiar(){
+async function resetSorteio(){
+  if(!confirm('Resetar sorteio?')) return;
+  await db.from('premios').update({vencedor:null,sorteado:false}).eq('id',drawPrize);
+  renderSorteio();
+}
+
+async function openAdiar(){
+  const { data: prizes } = await db.from('premios').select('*').eq('ativo',true).eq('sorteado',false);
   const sel = document.getElementById('adiar-prize');
-  sel.innerHTML = S.prizes.filter(p=>p.active&&!p.drawn).map(p=>`<option value="${p.id}" ${p.id===drawPrize?'selected':''}>${p.icon} ${p.name}</option>`).join('');
+  sel.innerHTML = (prizes||[]).map(p=>`<option value="${p.id}" ${p.id===drawPrize?'selected':''}>${p.icone} ${p.nome}</option>`).join('');
   const d=new Date(); d.setDate(d.getDate()+7);
   document.getElementById('adiar-dt').value = d.toISOString().slice(0,16);
   document.getElementById('adiar-mot').value = '';
   openOvl('ovl-adiar');
 }
 
-function confirmarAdiar(){
-  if(!isAdmin(S.user?.email)) return;
+async function confirmarAdiar(){
+  if(!isAdmin(CU?.email)) return;
   const pid=document.getElementById('adiar-prize').value, dt=document.getElementById('adiar-dt').value;
   if(!dt){ notify('Informe a nova data!',1); return; }
-  const p=S.prizes.find(x=>x.id===pid);
-  if(p){ p.drawDate=new Date(dt).toISOString(); save(); closeOvl('ovl-adiar'); renderSorteio(); notify('Sorteio adiado!'); }
+  await db.from('premios').update({data_sorteio:new Date(dt).toISOString()}).eq('id',pid);
+  closeOvl('ovl-adiar'); renderSorteio(); notify('Sorteio adiado!');
 }
 
 // ════════════════════════════════════════════════
@@ -893,34 +940,32 @@ function confirmarAdiar(){
 let recEmail = '';
 
 function renderAuth(){
-  if(S.user){ authTab('profile'); return; }
+  if(CU){ authTab('profile'); return; }
   authTab('l');
 }
 
 function authTab(tab){
   const body = document.getElementById('auth-body');
-  const tswL = document.getElementById('tsw-l'), tswR = document.getElementById('tsw-r');
-  if(tswL) tswL.classList.toggle('active', tab==='l');
-  if(tswR) tswR.classList.toggle('active', tab==='r');
-
-  const gBtn = `<button class="g-btn" onclick="notify('Login com Google em breve! Use email por enquanto.',0)">
-    <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-    Continuar com Google
-  </button><div class="divider">ou com email</div>`;
+  const tswL=document.getElementById('tsw-l'), tswR=document.getElementById('tsw-r');
+  if(tswL) tswL.classList.toggle('active',tab==='l');
+  if(tswR) tswR.classList.toggle('active',tab==='r');
+  const gBtn=`<button class="g-btn" onclick="notify('Login com Google em breve! Use email por enquanto.',0)"><svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>Continuar com Google</button><div class="divider">ou com email</div>`;
 
   if(tab==='profile'){
-    body.innerHTML = `<div style="text-align:center;padding:8px 0">
+    body.innerHTML=`<div style="text-align:center;padding:8px 0">
       <div style="width:64px;height:64px;border-radius:50%;background:rgba(255,214,0,.1);border:2px solid rgba(255,214,0,.25);margin:0 auto 14px;display:flex;align-items:center;justify-content:center;font-size:30px">👤</div>
-      <div style="font-weight:800;font-size:18px;margin-bottom:4px">${S.user.name}</div>
-      <div style="font-size:13px;color:var(--t2);margin-bottom:22px">${S.user.email}</div>
-      ${hasAccess(S.user.email)?`<button class="btn btn-gh btn-sm btn-full" style="margin-bottom:10px" onclick="goPage('admin')">🔧 Painel Admin</button>`:''}
+      <div style="font-weight:800;font-size:18px;margin-bottom:4px">${CU.nome}</div>
+      <div style="font-size:13px;color:var(--t2);margin-bottom:22px">${CU.email}</div>
+      ${isAdmin(CU.email)?`<button class="btn btn-gh btn-sm btn-full" style="margin-bottom:10px" onclick="goPage('admin')">🔧 Painel Admin</button>`:''}
       <button class="btn btn-r btn-sm btn-full" onclick="doLogout()">Sair da Conta</button>
     </div>`;
+    // Also show admin for mod
+    if(!isAdmin(CU.email)) isMod(CU.email).then(ok=>{ if(ok){ const btn=document.createElement('button'); btn.className='btn btn-gh btn-sm btn-full'; btn.style.marginBottom='10px'; btn.textContent='🔧 Painel Admin'; btn.onclick=()=>goPage('admin'); body.querySelector('button.btn-r').before(btn); } });
   }
   else if(tab==='l'){
-    body.innerHTML = `${gBtn}
-      <div class="fg"><label>Email</label><input id="l-em" type="email" placeholder="seu@email.com" autocomplete="email"></div>
-      <div class="fg"><label>Senha</label><input id="l-pw" type="password" placeholder="••••••••" autocomplete="current-password"></div>
+    body.innerHTML=`${gBtn}
+      <div class="fg"><label>Email</label><input id="l-em" type="email" placeholder="seu@email.com"></div>
+      <div class="fg"><label>Senha</label><input id="l-pw" type="password" placeholder="••••••••"></div>
       <button class="btn btn-y btn-sm btn-full" style="margin-top:4px" onclick="doLogin()">Entrar →</button>
       <div style="text-align:center;margin-top:12px;font-size:13px;color:var(--t2)">
         <a href="#" onclick="openRecovery();return false" style="color:var(--y)">Esqueceu a senha?</a>
@@ -928,47 +973,47 @@ function authTab(tab){
       </div>`;
   }
   else if(tab==='r'){
-    body.innerHTML = `${gBtn}
-      <div class="fg"><label>Nome Completo *</label><input id="r-nm" placeholder="Seu nome" autocomplete="name"></div>
-      <div class="fg"><label>Email *</label><input id="r-em" type="email" placeholder="seu@email.com" autocomplete="email"></div>
-      <div class="fg"><label>WhatsApp</label><input id="r-ph" placeholder="(66) 00000-0000" autocomplete="tel"></div>
-      <div class="fg"><label>Senha * (mín. 6 caracteres)</label><input id="r-pw" type="password" placeholder="••••••••" autocomplete="new-password"></div>
-      <div class="fg"><label>Confirmar Senha *</label><input id="r-pw2" type="password" placeholder="Repita a senha" autocomplete="new-password"></div>
+    body.innerHTML=`${gBtn}
+      <div class="fg"><label>Nome Completo *</label><input id="r-nm" placeholder="Seu nome"></div>
+      <div class="fg"><label>Email *</label><input id="r-em" type="email" placeholder="seu@email.com"></div>
+      <div class="fg"><label>WhatsApp</label><input id="r-ph" placeholder="(66) 00000-0000"></div>
+      <div class="fg"><label>Senha * (mín. 6 caracteres)</label><input id="r-pw" type="password" placeholder="••••••••"></div>
+      <div class="fg"><label>Confirmar Senha *</label><input id="r-pw2" type="password" placeholder="Repita a senha"></div>
       <button class="btn btn-y btn-sm btn-full" style="margin-top:4px" onclick="doRegister()">Criar Conta →</button>
-      <div style="text-align:center;margin-top:12px;font-size:13px;color:var(--t2)">
-        Já tem conta? <a href="#" onclick="authTab('l');return false" style="color:var(--y)">Entrar</a>
-      </div>`;
+      <div style="text-align:center;margin-top:12px;font-size:13px;color:var(--t2)">Já tem conta? <a href="#" onclick="authTab('l');return false" style="color:var(--y)">Entrar</a></div>`;
   }
 }
 
-function doLogin(){
+async function doLogin(){
   const em=document.getElementById('l-em').value.trim(), pw=document.getElementById('l-pw').value;
-  const u=S.users.find(x=>x.email===em&&x.pass===pw);
+  if(!em||!pw){ notify('Preencha email e senha!',1); return; }
+  const hash = await hashPass(pw);
+  const { data: u, error } = await db.from('usuarios').select('*').eq('email',em).eq('senha_hash',hash).single();
   if(!u){ notify('Email ou senha incorretos!',1); return; }
-  S.user=u; save();
-  document.getElementById('auth-lbl').textContent=u.name.split(' ')[0];
-  notify('Bem-vindo, '+u.name.split(' ')[0]+'! 🎉');
+  CU=u; saveSession();
+  document.getElementById('auth-lbl').textContent=u.nome.split(' ')[0];
+  notify('Bem-vindo, '+u.nome.split(' ')[0]+'! 🎉');
   authTab('profile');
 }
 
-function doRegister(){
+async function doRegister(){
   const nm=document.getElementById('r-nm').value.trim(), em=document.getElementById('r-em').value.trim();
   const ph=document.getElementById('r-ph').value.trim(), pw=document.getElementById('r-pw').value, pw2=document.getElementById('r-pw2').value;
   if(!nm||!em||!pw){ notify('Preencha os campos obrigatórios!',1); return; }
   if(pw!==pw2){ notify('As senhas não coincidem!',1); return; }
   if(pw.length<6){ notify('Senha deve ter no mínimo 6 caracteres!',1); return; }
-  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ notify('Email inválido!',1); return; }
-  if(S.users.find(x=>x.email===em)){ notify('Email já cadastrado!',1); return; }
-  const u={email:em,name:nm,phone:ph,pass:pw,createdAt:new Date().toISOString()};
-  S.users.push(u); S.user=u; save();
+  const hash = await hashPass(pw);
+  const { data: u, error } = await db.from('usuarios').insert({email:em,nome:nm,telefone:ph,senha_hash:hash}).select().single();
+  if(error){ notify(error.code==='23505'?'Email já cadastrado!':'Erro: '+error.message,1); return; }
+  CU=u; saveSession();
   document.getElementById('auth-lbl').textContent=nm.split(' ')[0];
   notify('Conta criada! Bem-vindo, '+nm.split(' ')[0]+'! 🎉');
   authTab('profile');
 }
 
-function doLogout(){ S.user=null; save(); document.getElementById('auth-lbl').textContent='Entrar'; notify('Até logo!'); authTab('l'); }
+function doLogout(){ clearSession(); document.getElementById('auth-lbl').textContent='Entrar'; notify('Até logo!'); authTab('l'); }
 
-// ── PASSWORD RECOVERY ──
+// ── Recovery ──
 function openRecovery(){
   recEmail='';
   document.getElementById('rec-s1').style.display='block';
@@ -977,199 +1022,191 @@ function openRecovery(){
   openOvl('ovl-recovery');
 }
 
-function sendRecovery(){
+async function sendRecovery(){
   const em=document.getElementById('rec-email').value.trim().toLowerCase();
   if(!em){ notify('Informe o email!',1); return; }
-  const user=S.users.find(u=>u.email===em);
-  if(!user){ notify('Email não encontrado!',1); return; }
+  const { data: u } = await db.from('usuarios').select('id').eq('email',em).single();
+  if(!u){ notify('Email não encontrado!',1); return; }
   const code=String(Math.floor(100000+Math.random()*900000));
   const expires=new Date(Date.now()+15*60*1000).toISOString();
-  if(!S.recoveryTokens) S.recoveryTokens=[];
-  S.recoveryTokens=S.recoveryTokens.filter(t=>t.email!==em);
-  S.recoveryTokens.push({email:em,code,expires,used:false});
-  save(); recEmail=em;
+  await db.from('recovery_tokens').delete().eq('email',em);
+  await db.from('recovery_tokens').insert({email:em,codigo:code,expira_em:expires});
+  recEmail=em;
   document.getElementById('rec-s1').style.display='none';
   document.getElementById('rec-code').textContent=code;
   document.getElementById('rec-s2').style.display='block';
-  document.getElementById('np-code').value='';
-  document.getElementById('np-pass').value='';
-  document.getElementById('np-pass2').value='';
 }
 
-function confirmNewPass(){
+async function confirmNewPass(){
   const code=document.getElementById('np-code').value.trim();
   const pw=document.getElementById('np-pass').value, pw2=document.getElementById('np-pass2').value;
   if(!code||!pw||!pw2){ notify('Preencha todos os campos!',1); return; }
   if(pw!==pw2){ notify('As senhas não coincidem!',1); return; }
   if(pw.length<6){ notify('Mínimo 6 caracteres!',1); return; }
-  const token=S.recoveryTokens.find(t=>t.email===recEmail&&t.code===code&&!t.used);
+  const { data: token } = await db.from('recovery_tokens').select('*').eq('email',recEmail).eq('codigo',code).eq('usado',false).single();
   if(!token){ notify('Código inválido!',1); return; }
-  if(new Date()>new Date(token.expires)){ notify('Código expirado! Solicite um novo.',1); return; }
-  const user=S.users.find(u=>u.email===recEmail);
-  if(!user){ notify('Usuário não encontrado!',1); return; }
-  user.pass=pw; token.used=true; save();
-  notify('Senha redefinida com sucesso! ✅');
-  closeOvl('ovl-recovery');
-  recEmail='';
-  goPage('auth');
+  if(new Date()>new Date(token.expira_em)){ notify('Código expirado!',1); return; }
+  const hash = await hashPass(pw);
+  await db.from('usuarios').update({senha_hash:hash}).eq('email',recEmail);
+  await db.from('recovery_tokens').update({usado:true}).eq('id',token.id);
+  notify('Senha redefinida! ✅'); closeOvl('ovl-recovery'); recEmail=''; goPage('auth');
 }
 
 // ════════════════════════════════════════════════
 // ADMIN
 // ════════════════════════════════════════════════
-function renderAdmin(){
-  if(!hasAccess(S.user?.email)) return;
-  document.getElementById('admin-email-lbl').textContent = S.user.email;
-  // Show/hide co-admins tab (only full admin)
-  document.getElementById('tab-coadmins').style.display = isAdmin(S.user.email) ? 'flex' : 'none';
-  // Stats
-  const paid=S.orders.filter(o=>o.status==='paid');
-  const rev=paid.reduce((s,o)=>s+o.total,0);
-  const wait=S.orders.filter(o=>o.status==='waiting').length;
+async function renderAdmin(){
+  if(!CU) return;
+  const ok = await hasAccess(CU.email);
+  if(!ok) return;
+  document.getElementById('admin-email-lbl').textContent = CU.email;
+  document.getElementById('tab-coadmins').style.display = isAdmin(CU.email) ? 'flex' : 'none';
+
+  const [{ count: pedidosTot }, { count: waitTot }, { count: usersTot }] = await Promise.all([
+    db.from('pedidos').select('*',{count:'exact',head:true}),
+    db.from('pedidos').select('*',{count:'exact',head:true}).eq('status','waiting'),
+    db.from('usuarios').select('*',{count:'exact',head:true})
+  ]);
+  const { data: paidPed } = await db.from('pedidos').select('total').eq('status','paid');
+  const rev = (paidPed||[]).reduce((s,o)=>s+parseFloat(o.total),0);
+
   document.getElementById('admin-stats').innerHTML=`
     <div class="astat"><div class="astat-l">Arrecadado</div><div class="astat-v">R$ ${rev.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,'.')}</div><div class="astat-s">confirmados</div></div>
-    <div class="astat"><div class="astat-l">Aguardando</div><div class="astat-v">${wait}</div><div class="astat-s">p/ aprovar</div></div>
-    <div class="astat"><div class="astat-l">Total Pedidos</div><div class="astat-v">${S.orders.length}</div><div class="astat-s">todos os status</div></div>
-    <div class="astat"><div class="astat-l">Usuários</div><div class="astat-v">${S.users.length}</div><div class="astat-s">cadastrados</div></div>`;
-  // Default tab — mod sees only pedidos
-  const defaultTab = isMod(S.user.email) ? 'pedidos' : 'pedidos';
-  adminTab(defaultTab, document.querySelector('.atab.active'));
+    <div class="astat"><div class="astat-l">Aguardando</div><div class="astat-v">${waitTot||0}</div><div class="astat-s">p/ aprovar</div></div>
+    <div class="astat"><div class="astat-l">Total Pedidos</div><div class="astat-v">${pedidosTot||0}</div><div class="astat-s">todos os status</div></div>
+    <div class="astat"><div class="astat-l">Usuários</div><div class="astat-v">${usersTot||0}</div><div class="astat-s">cadastrados</div></div>`;
+
+  adminTab('pedidos', document.querySelector('.atab.active'));
 }
 
-function adminTab(tab, el){
+async function adminTab(tab, el){
   document.querySelectorAll('.atab').forEach(t=>t.classList.remove('active'));
   if(el) el.classList.add('active');
-  else {
+  else{
     const map={pedidos:'📦 Pedidos',premios:'🏆 Prêmios',usuarios:'👥 Usuários',coadmins:'🔐 Co-admins'};
-    document.querySelectorAll('.atab').forEach(t=>{ if(t.textContent.trim()===map[tab]) t.classList.add('active'); });
+    document.querySelectorAll('.atab').forEach(t=>{if(t.textContent.trim()===map[tab])t.classList.add('active');});
   }
   const actEl=document.getElementById('admin-tab-action');
   actEl.innerHTML=
-    (tab==='premios'&&isAdmin(S.user?.email))  ? '<button class="btn btn-y btn-sm" onclick="openAddPrize()">➕ Novo Prêmio</button>' :
-    (tab==='coadmins'&&isAdmin(S.user?.email)) ? '<button class="btn btn-y btn-sm" onclick="openAddCoadmin()">➕ Novo Co-admin</button>' : '';
-
+    (tab==='premios'&&isAdmin(CU?.email)) ? '<button class="btn btn-y btn-sm" onclick="openAddPrize()">➕ Novo Prêmio</button>' :
+    (tab==='coadmins'&&isAdmin(CU?.email)) ? '<button class="btn btn-y btn-sm" onclick="openAddCoadmin()">➕ Novo Co-admin</button>' : '';
   const body=document.getElementById('admin-body');
-  if(tab==='pedidos')  renderTabPedidos(body);
-  else if(tab==='premios')  renderTabPremios(body);
-  else if(tab==='usuarios') renderTabUsuarios(body);
-  else if(tab==='coadmins') renderTabCoadmins(body);
+  if(tab==='pedidos')       await renderTabPedidos(body);
+  else if(tab==='premios')  await renderTabPremios(body);
+  else if(tab==='usuarios') await renderTabUsuarios(body);
+  else if(tab==='coadmins') await renderTabCoadmins(body);
 }
 
-function renderTabPedidos(body){
+async function renderTabPedidos(body){
+  const { data: orders } = await db.from('pedidos').select('*').order('id',{ascending:false});
   const sm={pending:['b-p','Aguard. Pgto'],waiting:['b-w','Comp. Enviado'],paid:['b-ok','Aprovado'],cancelled:['b-x','Cancelado']};
-  const orders=[...S.orders].sort((a,b)=>b.id-a.id);
-  if(!orders.length){ body.innerHTML='<div class="empty"><div class="empty-ico">📦</div>Nenhum pedido ainda.</div>'; return; }
+  if(!orders?.length){ body.innerHTML='<div class="empty"><div class="empty-ico">📦</div>Nenhum pedido ainda.</div>'; return; }
   body.innerHTML=`<div class="twrap"><table>
     <thead><tr><th>#</th><th>Comprador</th><th>Prêmio</th><th>Números</th><th>Total</th><th>Status</th><th>Ações</th></tr></thead>
     <tbody>${orders.map(o=>{
-      const[bc,bt]=sm[o.status]||['b-p','?'];
+      const [bc,bt]=sm[o.status]||['b-p','?'];
       return `<tr>
         <td style="font-weight:800;color:var(--y)">#${o.id}</td>
-        <td><div style="font-weight:700">${o.userName}</div><div style="font-size:10px;color:var(--t3)">${o.userId}</div></td>
-        <td style="font-size:12px">${o.prizeIcon||''} ${o.prizeName}</td>
-        <td><div style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--t2)">${o.numbers.join(', ')}</div></td>
+        <td><div style="font-weight:700">${o.usuario_nome}</div><div style="font-size:10px;color:var(--t3)">${o.usuario_email}</div></td>
+        <td style="font-size:12px">${o.premio_icone||''} ${o.premio_nome}</td>
+        <td><div style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--t2)">${o.numeros.join(', ')}</div></td>
         <td style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--y)">R$ ${o.total}</td>
         <td><span class="badge ${bc}">${bt}</span></td>
         <td><div style="display:flex;gap:4px">
-          ${o.status==='waiting'?`<button class="btn btn-g btn-sm" onclick="approveOrder(${o.id})" title="Aprovar">✓</button>`:''}
-          ${['pending','waiting'].includes(o.status)?`<button onclick="cancelOrder(${o.id})" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif" title="Cancelar">✕</button>`:''}
-          ${o.comp?`<button class="btn btn-gh btn-sm" onclick="viewComp(${o.id})" title="Ver comprovante">📄</button>`:''}
+          ${o.status==='waiting'?`<button class="btn btn-g btn-sm" onclick="approveOrder(${o.id})">✓</button>`:''}
+          ${['pending','waiting'].includes(o.status)?`<button onclick="cancelOrder(${o.id})" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:800;cursor:pointer;font-family:'Nunito',sans-serif">✕</button>`:''}
+          ${o.comprovante?`<button class="btn btn-gh btn-sm" onclick="viewComp(${o.id})">📄</button>`:''}
         </div></td>
       </tr>`;
     }).join('')}</tbody>
   </table></div>`;
 }
 
-function renderTabPremios(body){
-  body.innerHTML=S.prizes.map(p=>{
-    const sold=getSold(p.id).length, rev=S.orders.filter(o=>o.prizeId===p.id&&o.status==='paid').reduce((s,o)=>s+o.total,0), pct=Math.round(sold/p.total*100);
+async function renderTabPremios(body){
+  const { data: prizes } = await db.from('premios').select('*').order('criado_em');
+  const { data: pedidos } = await db.from('pedidos').select('premio_id,numeros,total,status');
+  body.innerHTML=(prizes||[]).map(p=>{
+    const sold=(pedidos||[]).filter(o=>o.premio_id===p.id&&o.status==='paid').flatMap(o=>o.numeros).length;
+    const rev=(pedidos||[]).filter(o=>o.premio_id===p.id&&o.status==='paid').reduce((s,o)=>s+parseFloat(o.total),0);
+    const pct=Math.round(sold/p.total*100);
     return `<div class="pac">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">
-        <div style="display:flex;align-items:center;gap:12px">
-          <span style="font-size:26px">${p.icon}</span>
-          <div><div style="font-weight:800">${p.name}</div><div style="font-size:11px;color:var(--t2)">${p.desc} · ${p.total} nºs · R$${p.price}/nº</div></div>
-        </div>
-        <div style="text-align:right"><div style="font-weight:800;color:var(--g);font-size:15px">R$ ${rev.toFixed(0)}</div><div style="font-size:10px;color:var(--t3)">arrecadado</div></div>
+        <div style="display:flex;align-items:center;gap:12px"><span style="font-size:26px">${p.icone}</span><div><div style="font-weight:800">${p.nome}</div><div style="font-size:11px;color:var(--t2)">${p.descricao} · ${p.total} nºs · R$${p.preco}/nº</div></div></div>
+        <div style="text-align:right"><div style="font-weight:800;color:var(--g)">R$ ${rev.toFixed(0)}</div><div style="font-size:10px;color:var(--t3)">arrecadado</div></div>
       </div>
       <div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div>
-      <div style="font-size:11px;color:var(--t2);margin-bottom:10px">${sold}/${p.total} vendidos · Sorteio: ${fd(new Date(p.drawDate))} ${p.drawn?'· <span style="color:#4ade80">✅ Nº '+p.winner+'</span>':''}</div>
+      <div style="font-size:11px;color:var(--t2);margin-bottom:10px">${sold}/${p.total} vendidos · Sorteio: ${fd(p.data_sorteio)}${p.sorteado?' · <span style="color:#4ade80">✅ Nº '+p.vencedor+'</span>':''}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-gh btn-sm" onclick="openEditPrize('${p.id}')">✏️ Editar</button>
         <button class="btn btn-gh btn-sm" onclick="selectDrawPrize('${p.id}');goPage('sorteio')">🎲 Sorteio</button>
-        <button onclick="togglePrize('${p.id}')" style="background:rgba(255,255,255,.04);border:1px solid var(--border);color:${p.active?'#f87171':'#4ade80'};border-radius:8px;padding:7px 14px;font-family:'Nunito',sans-serif;font-size:13px;font-weight:800;cursor:pointer">${p.active?'⏸ Pausar':'▶ Ativar'}</button>
+        <button onclick="togglePrize('${p.id}')" style="background:rgba(255,255,255,.04);border:1px solid var(--border);color:${p.ativo?'#f87171':'#4ade80'};border-radius:8px;padding:7px 14px;font-family:'Nunito',sans-serif;font-size:13px;font-weight:800;cursor:pointer">${p.ativo?'⏸ Pausar':'▶ Ativar'}</button>
       </div>
     </div>`;
   }).join('');
 }
 
-function renderTabUsuarios(body){
-  if(!S.users.length){ body.innerHTML='<div class="empty"><div class="empty-ico">👥</div>Nenhum usuário cadastrado.</div>'; return; }
+async function renderTabUsuarios(body){
+  const { data: users } = await db.from('usuarios').select('*').order('criado_em',{ascending:false});
+  const { data: pedidos } = await db.from('pedidos').select('usuario_email');
+  if(!users?.length){ body.innerHTML='<div class="empty"><div class="empty-ico">👥</div>Nenhum usuário.</div>'; return; }
   body.innerHTML=`<div class="twrap"><table>
     <thead><tr><th>Nome</th><th>Email</th><th>WhatsApp</th><th>Cadastro</th><th>Pedidos</th></tr></thead>
-    <tbody>${S.users.map(u=>`<tr>
-      <td style="font-weight:700">${u.name}</td>
+    <tbody>${users.map(u=>`<tr>
+      <td style="font-weight:700">${u.nome}</td>
       <td style="font-size:11px;color:var(--t2)">${u.email}</td>
-      <td style="font-size:11px">${u.phone||'—'}</td>
-      <td style="font-size:11px;color:var(--t2)">${fd(new Date(u.createdAt))}</td>
-      <td style="font-weight:800;color:var(--y)">${S.orders.filter(o=>o.userId===u.email).length}</td>
+      <td style="font-size:11px">${u.telefone||'—'}</td>
+      <td style="font-size:11px;color:var(--t2)">${fd(u.criado_em)}</td>
+      <td style="font-weight:800;color:var(--y)">${(pedidos||[]).filter(o=>o.usuario_email===u.email).length}</td>
     </tr>`).join('')}</tbody>
   </table></div>`;
 }
 
-function renderTabCoadmins(body){
-  if(!isAdmin(S.user?.email)){ body.innerHTML='<div class="empty">Sem permissão.</div>'; return; }
-  const list=S.coadmins||[];
-  if(!list.length){ body.innerHTML='<div class="empty"><div class="empty-ico">🔐</div>Nenhum co-admin cadastrado.<br>Clique em "Novo Co-admin" para adicionar.</div>'; return; }
+async function renderTabCoadmins(body){
+  const { data: list } = await db.from('coadmins').select('*').order('criado_em');
+  if(!list?.length){ body.innerHTML='<div class="empty"><div class="empty-ico">🔐</div>Nenhum co-admin.<br>Clique em "Novo Co-admin".</div>'; return; }
   body.innerHTML=list.map(c=>`
     <div class="ca-row">
       <div style="display:flex;align-items:center;gap:12px">
         <div style="width:42px;height:42px;border-radius:50%;background:rgba(255,214,0,.1);border:2px solid rgba(255,214,0,.25);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🔐</div>
-        <div>
-          <div style="font-weight:800">${c.name}</div>
-          <div style="font-size:12px;color:var(--t2)">${c.email}</div>
-          <div style="font-size:11px;color:var(--t3);margin-top:2px">Adicionado em ${fd(new Date(c.createdAt))}</div>
-        </div>
+        <div><div style="font-weight:800">${c.nome}</div><div style="font-size:12px;color:var(--t2)">${c.email}</div></div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span class="badge ${c.active?'b-ok':'b-x'}">${c.active?'Ativo':'Inativo'}</span>
-        <button onclick="toggleCoadmin('${c.email}')" style="background:rgba(255,255,255,.05);border:1px solid var(--border);color:${c.active?'#f87171':'#4ade80'};border-radius:8px;padding:6px 12px;font-family:'Nunito',sans-serif;font-size:12px;font-weight:800;cursor:pointer">${c.active?'Desativar':'Ativar'}</button>
-        <button onclick="removeCoadmin('${c.email}')" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:8px;padding:6px 12px;font-family:'Nunito',sans-serif;font-size:12px;font-weight:800;cursor:pointer">Remover</button>
+        <span class="badge ${c.ativo?'b-ok':'b-x'}">${c.ativo?'Ativo':'Inativo'}</span>
+        <button onclick="toggleCoadmin('${c.id}',${!c.ativo})" style="background:rgba(255,255,255,.05);border:1px solid var(--border);color:${c.ativo?'#f87171':'#4ade80'};border-radius:8px;padding:6px 12px;font-family:'Nunito',sans-serif;font-size:12px;font-weight:800;cursor:pointer">${c.ativo?'Desativar':'Ativar'}</button>
+        <button onclick="removeCoadmin('${c.id}')" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:8px;padding:6px 12px;font-family:'Nunito',sans-serif;font-size:12px;font-weight:800;cursor:pointer">Remover</button>
       </div>
     </div>`).join('');
 }
 
 // ── Admin actions ──
-function approveOrder(id){ const o=S.orders.find(x=>x.id===id); if(o){o.status='paid';save();renderAdmin();notify('Pedido aprovado! ✅');} }
-function cancelOrder(id){ if(!confirm('Cancelar este pedido?'))return; const o=S.orders.find(x=>x.id===id); if(o){o.status='cancelled';save();renderAdmin();notify('Pedido cancelado.');} }
-function togglePrize(id){ const p=S.prizes.find(x=>x.id===id); if(p){p.active=!p.active;save();adminTab('premios',null);} }
-function toggleCoadmin(email){ const c=(S.coadmins||[]).find(x=>x.email===email); if(c){c.active=!c.active;save();adminTab('coadmins',null);notify(c.active?'Co-admin ativado!':'Co-admin desativado.');} }
-function removeCoadmin(email){ if(!confirm('Remover este co-admin?'))return; S.coadmins=(S.coadmins||[]).filter(c=>c.email!==email); save();adminTab('coadmins',null);notify('Co-admin removido.'); }
+async function approveOrder(id){ await db.from('pedidos').update({status:'paid'}).eq('id',id); adminTab('pedidos',null); notify('Pedido aprovado! ✅'); }
+async function cancelOrder(id){ if(!confirm('Cancelar?'))return; await db.from('pedidos').update({status:'cancelled'}).eq('id',id); adminTab('pedidos',null); notify('Pedido cancelado.'); }
+async function togglePrize(id){ const {data:p}=await db.from('premios').select('ativo').eq('id',id).single(); await db.from('premios').update({ativo:!p.ativo}).eq('id',id); adminTab('premios',null); }
+async function toggleCoadmin(id,ativo){ await db.from('coadmins').update({ativo}).eq('id',id); adminTab('coadmins',null); notify(ativo?'Co-admin ativado!':'Co-admin desativado.'); }
+async function removeCoadmin(id){ if(!confirm('Remover?'))return; await db.from('coadmins').delete().eq('id',id); adminTab('coadmins',null); notify('Co-admin removido.'); }
 
-function viewComp(id){
-  const o=S.orders.find(x=>x.id===id); if(!o?.comp) return;
+async function viewComp(id){
+  const { data: o } = await db.from('pedidos').select('*').eq('id',id).single();
+  if(!o?.comprovante) return;
+  const c = o.comprovante;
   document.getElementById('comp-body').innerHTML=`
-    <div class="fg"><label>ID Comprovante</label><div style="background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px;word-break:break-all">${o.comp.txid||'—'}</div></div>
-    <div class="fg"><label>Banco / Chave do pagante</label><div style="background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px">${o.comp.from||'—'}</div></div>
-    ${o.comp.obs?`<div class="fg"><label>Observação</label><div style="background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px">${o.comp.obs}</div></div>`:''}
-    <div style="font-size:11px;color:var(--t3)">Enviado em ${fdt(new Date(o.comp.at))}</div>`;
+    <div class="fg"><label>ID Comprovante</label><div style="background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px;word-break:break-all">${c.txid||'—'}</div></div>
+    <div class="fg"><label>Banco / Chave</label><div style="background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px">${c.from||'—'}</div></div>
+    ${c.obs?`<div class="fg"><label>Obs</label><div style="background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px">${c.obs}</div></div>`:''}
+    <div style="font-size:11px;color:var(--t3)">Enviado em ${fdt(c.at)}</div>`;
   document.getElementById('comp-approve-btn').onclick=()=>{approveOrder(id);closeOvl('ovl-comp');};
   openOvl('ovl-comp');
 }
 
 function openAddCoadmin(){ document.getElementById('ca-name').value=''; document.getElementById('ca-email').value=''; openOvl('ovl-coadmin'); }
-
-function saveCoadmin(){
+async function saveCoadmin(){
   const name=document.getElementById('ca-name').value.trim(), email=document.getElementById('ca-email').value.trim().toLowerCase();
   if(!name||!email){ notify('Preencha nome e email!',1); return; }
-  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ notify('Email inválido!',1); return; }
-  if(email===ADMIN_EMAIL){ notify('Este email já é o admin principal!',1); return; }
-  if(!S.coadmins) S.coadmins=[];
-  if(S.coadmins.find(c=>c.email===email)){ notify('Email já é co-admin!',1); return; }
-  S.coadmins.push({email,name,active:true,createdAt:new Date().toISOString()});
-  save(); closeOvl('ovl-coadmin'); adminTab('coadmins',null); notify('Co-admin '+name+' adicionado! ✅');
+  const { error } = await db.from('coadmins').insert({email,nome:name});
+  if(error){ notify(error.code==='23505'?'Email já é co-admin!':'Erro: '+error.message,1); return; }
+  closeOvl('ovl-coadmin'); adminTab('coadmins',null); notify('Co-admin '+name+' adicionado! ✅');
 }
 
-// ── Prize form ──
 function openAddPrize(){
   document.getElementById('prize-modal-title').textContent='🏆 Novo Prêmio';
   document.getElementById('ovl-prize').dataset.editId='';
@@ -1184,23 +1221,23 @@ function openAddPrize(){
   openOvl('ovl-prize');
 }
 
-function openEditPrize(id){
-  const p=S.prizes.find(x=>x.id===id); if(!p) return;
+async function openEditPrize(id){
+  const {data:p}=await db.from('premios').select('*').eq('id',id).single(); if(!p) return;
   document.getElementById('prize-modal-title').textContent='✏️ Editar Prêmio';
   document.getElementById('ovl-prize').dataset.editId=id;
-  document.getElementById('pf-name').value=p.name;
-  document.getElementById('pf-icon').value=p.icon;
-  document.getElementById('pf-desc').value=p.desc;
+  document.getElementById('pf-name').value=p.nome;
+  document.getElementById('pf-icon').value=p.icone;
+  document.getElementById('pf-desc').value=p.descricao||'';
   document.getElementById('pf-total').value=p.total;
-  document.getElementById('pf-price').value=p.price;
-  document.getElementById('pf-pix').value=p.pixKey;
-  document.getElementById('pf-pixname').value=p.pixName;
-  document.getElementById('pf-pixtype').value=p.pixType||'Telefone';
-  document.getElementById('pf-draw').value=new Date(p.drawDate).toISOString().slice(0,16);
+  document.getElementById('pf-price').value=p.preco;
+  document.getElementById('pf-pix').value=p.pix_chave;
+  document.getElementById('pf-pixname').value=p.pix_nome;
+  document.getElementById('pf-pixtype').value=p.pix_tipo||'Telefone';
+  document.getElementById('pf-draw').value=new Date(p.data_sorteio).toISOString().slice(0,16);
   openOvl('ovl-prize');
 }
 
-function savePrize(){
+async function savePrize(){
   const nm=document.getElementById('pf-name').value.trim(), ic=document.getElementById('pf-icon').value.trim()||'🏆';
   const ds=document.getElementById('pf-desc').value.trim(), tot=parseInt(document.getElementById('pf-total').value);
   const pr=parseFloat(document.getElementById('pf-price').value), dt=document.getElementById('pf-draw').value;
@@ -1208,37 +1245,17 @@ function savePrize(){
   const pt=document.getElementById('pf-pixtype').value;
   if(!nm||!dt||!pk){ notify('Preencha os campos obrigatórios!',1); return; }
   const eid=document.getElementById('ovl-prize').dataset.editId;
-  if(eid){ const p=S.prizes.find(x=>x.id===eid); if(p) Object.assign(p,{name:nm,icon:ic,desc:ds,total:tot,price:pr,drawDate:new Date(dt).toISOString(),pixKey:pk,pixName:pn,pixType:pt}); }
-  else S.prizes.push({id:'p'+Date.now(),name:nm,icon:ic,desc:ds,total:tot,price:pr,drawDate:new Date(dt).toISOString(),pixKey:pk,pixName:pn,pixType:pt,winner:null,drawn:false,active:true});
-  save(); closeOvl('ovl-prize'); renderAdmin(); notify('Prêmio salvo! ✓');
+  const payload={nome:nm,icone:ic,descricao:ds,total:tot,preco:pr,data_sorteio:new Date(dt).toISOString(),pix_chave:pk,pix_nome:pn,pix_tipo:pt};
+  if(eid) await db.from('premios').update(payload).eq('id',eid);
+  else await db.from('premios').insert({...payload,id:'p'+Date.now()});
+  closeOvl('ovl-prize'); renderAdmin(); notify('Prêmio salvo! ✓');
 }
 
 // ════════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════════
-if(S.user) document.getElementById('auth-lbl').textContent=S.user.name.split(' ')[0];
+if(CU) document.getElementById('auth-lbl').textContent=CU.nome.split(' ')[0];
 renderHome();
 </script>
-
-<footer>
-  <div class="footer-in">
-    <a href="https://instagram.com/ftmdevelopment" target="_blank" class="footer-logo" title="FTM Development">
-      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAABzCAIAAABSN9p/AAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAABJf0lEQVR42u39ebxlV3UdCo8x19r7nHtv9aUqVakrhEDCQi02jbED2IJg0xkI7kB2wDgYeHnY5PMPTJzks1ESwLENcez3/EywY5zEz+BnY2KMaD6aPExvGwTqEOpLKlVftz3n7L3WHO+Ptc+551aVRHUS8D7t31Wp6tx99llnrbnmmnPMMeckSay9JOEErmPfeAoP+e567CM2tlMYz7FveejRPtzf3fDo9ej1MFyPCtaj18NycaLizohKPFlNe2af9oidAuWND/Yp38lf+RGbyUc11qPXo0fho9d3zxXP4LNEgIJgjggISCQICgYQcMC7zySyKllGdApIAKgz73A9TKfAydoPZ3aEq59e/jl+efxmEwSAsPKaKQPupNj9GoIeZuf3TAqWOQKRBBUZIkVWLgHZTCRcFOiqIAcIIWSTQlbi1NQ8ep2ohTwlX1DZ1rQMCaDo4w0viONb4OWUyt89GqsoLAJOJAtwRqebHAhugUFAoiincg5wCMpRqGBJ6vYZ+XBs/TPy2O/kp1EAZFCgCasHgASvDKIlRbmL7Rp993AN8kwKVjblACRQQW4mGd0ZjSbPSaPJJskAHD1gVhiBQ+tJDZQf1UEnL0ydMiIUABca905uxiKBBhUE0kOQM4iCO9IjoExP1+3s5JqAoco0hIaOKBFoFIEtxvNn+o+dmT23N7OtV/eruka1kZibjZ9tRr978y2NAOk0rZaHGORp2lUPhi98W+CPqcUzEKIABVCux21Y/6NnnZ1Sat2blJqUFwcrB3Pem5oDKS0AAoJVBLLSUZ94Zgd50hrroZ4rhIwIJgBBStosPG127ilbt125fftjev2NRvdcpQbeKod+amKNI0DM3hh5gtr5ZPT2w2RcP5I+xInqB4cDj5mb++Vdu0bLy4l0SWYilxAXlPcMF786f+jzhw7fsLC0JAA0Hn/CjzuwR/QoLFagG6CxYYgwFBQdSU/rzfzkBY9/1o7NG5lySt4uNtmdsfHcBArsGedajFZEGJxgftR+P1Uh7SYuN81wfsHbNrlkFBlCXBdXtkCXVb3nnnPRvgvqrx4+cv3uOz546MCiYBbhCae9pc+oYBkrF4BRABwhI4NkEFI/+U+ec87P77xgB9UuLw5pkoMko4EeYyUA8EjCkDWCq7MKTuULnvIJdbIa5ZQfewonzgkaWRQAE+QUhAAqBM9ZcJoRJskTh1BGqtLyLJZ/IPKpj73wmTu2vOOO3bcPR30yU64gYeJInr5+PR2NpXZsitdO62yk1Ie/8cLHv3zzzlYrg9EowlKQkWYkKUkugwHIECd77dHrDF0JyeEwwCR3kHTQLEvZW7jgDuiH6y3nf8+Ot37zq59bnGdFJY7dgDOEPZ2O+nXCDXQLCILJMAt/8+MuefWG7b3Rkb7aGkGhHOWS5O6YCk+KEEk+Klpn8EiESJhAFuNeZfLd5eq0TrAZ1m0anY/533rCE75v8wa16ime2VU4UcHS+Fp9Z9E1DERoibYCXK8499yf3nh2OzrcVKOEtg2dV0wBLrjo5Z+dBwjSzGwKdzm1g+ao6zt67c/cICVp/MfEilcASdFJQYLcCApyn5gbI0MTvNXiuc3yW3c98fxYu1I8o1Nnp7k/zEEoR/eUf2Bm9ufO3TXUUuox0SQ63YkiOZ0sld2TRclJGI20E8brHr2+pXcYwO4YcIdnCp4959wtAQljY7mXfH3bW1B6Ul297vGXJKQcdAbtv1MXLCcAVEIFB7VJeOmux+8w1QZD5aiccSYhunwKBCo2luTughTNKguPRsLPoGAZSmRWBA1kdqoznjhWc0GeiYQNqbduHodetmnzP9q0xV2B9h2gsQjCAOUgpnD17NwP7Fg3SA1ayaxSQEYGq5wdcARD9jgUmuhe923j+v5Z1UbFzcNqriqGF7/9ttZ3y3k6fWiUOJqBBBCret3s7Ozc5vWbZmfWG6I5PXgNm2nCch0or5IDaCNSSL2sNlmM+tnzdmwWsqGSEGgMhtMyfuNpfSdZpucAa/z7t+3YhFFyIAS5S6poydwhADE7LFnTIqxb6q+/++Chvxs9cOtwdKD1fW0aMhTew6PXKUuXhADcdHj+jf/w9U20nb3Zx8z1nzBTn1fBhm0boBiCuwkmtWQAgiVzIvSWla/esunx/f4XR8NiFRvMT29FTl2wTBTgoLLPGL5387aQUyIp0EocFOY2CozZK3lyxLDhLvZ+785bP3HwwJLKuBlRufWlIfForPBUjhvvoGkE4IHR6H+MUkYGvS88aab6J+df8Jx1Z2G4MqiadQ2yoQ0kGAWZJYMr2xDbNm26cuvZX77vbu/OjXyaVm84jXeGchxKumh25jXnXtDLg9YpF4ECWRmZzXopp5DJcHvo/dqtX//M/JGGkSGQISC6yZkK+PCorJysRdUdVkYaAcqAKBkZLFm4t/HPHDw8N9N/cr0x+5CRLYNolWAwJxRMQHRtqHoHk/7ngb2NBQet+JA8XaE/JeO9Y/w4hAvralMFbwh1IiV1LkbliMKAfmRm7o/uvP0Lw+UcgjEhJ3orjaCWniifJuB3Ezf+J8fXd/Qyn7lBcup66BsFgqQgV/lDrpgVWjLJiCHwnju/eeuwmWU1sJwtuFkUnQTIDHqWfDQcPGGmd5ZZUiFrQuRDI6YPPcjTESwBHkAAF9czCa2jKrGZNR9JObWB6760tPTRIwctRIdayalMZjOBUaso1lHD/Q4Xpm+jBIN0G7P2xn4HIGQGsQdFZIejwj7xvQfuzjH0FKJb5WwjHEYxCBEmYOjtdsO2uT7kXCUQ2rdBYxUICyCBnf1eTikjHysFmURl/dj71AMPLAD9ZBMTLcqCkzIhEuxwY8jW/gTCVl+f9qi7P497QnTHBI0P/iXteD9c+2PH/7HOD5uMgBAlmlY/zYqnZhMcwE7dzyIIBHa8bhWgZxzA6PRW+ZGpQV6x3JoB0RKJ+KnFI7e3ow2sKJnoYfJm0CWg8dxznVP3O1cAOE1CQDyNCK6okGV95I0z/brxRg09FnCuYHEi4DHWea9GNy0uAWzRqKOnkco0wCwxIrODxjoOrSiCxDg6Ta5O8PQ5SYetGmflJTnNHIGp5Yx5CmhbVMc6B12kckIdF3S8pefqzHQUfhACSIeBGVGEFITGQkHrCAEmmFuiRAWCRBbkJ6+fViEquVGZRAzIqpy+ZnYA0qWIlMeSnekkjmT/6mD0vf1+glMxjAfiJfxRLOOoi3ozZb+pmxA/1ix5JOAGCYLPBa6vYpsTYYI6Ovuq8yiL1Z7Flb3NECEyJ4BUEENrCchMLoxW/eaH8qlP3Pv2zJouYZChDAHN8akTWvsXncjDV28LGQ6kEAFmpezNlHOTMjpqOZG8wkyLdOqwioBWhgaxyqHNoxawydPWDru1buMCTgGGFrhvMEjbzwo+POrmiU0M+Ja5ubGRc7qhkNPDsQBAG0LYHOvWExEkuGRT0h0khXjncLQAWIAckKkoNffv27Dh2ZvOjm1maHMQwQCYmRk7DvxYf5Yv74SvRS8zmYTpCHdttiePvrj/8LO2b58LFZ2ytvN/xhZKeWRwjGkXZZd2wYGjv6itqq1uDXJkhitZb/ZLg8WP7X+AoZ5zXnPuBdsMSo2TAYiZzhCMHsIHDuzek1uKOCXo1YAgtAqBoY/m+dt2Pm52biEPs5hzytkdkEQLNw9XvrIwL4ZiWoy/Fe5aXl4KrIhM2RQ/xt2B4lRqc6wjkHQaYMGxgnXyLFsRlPLmWG9gyJZiklwi3X3KWchu/ftGbQZC9nKaGFPJUrps/fpXnn9BPRiA7uYEA7ulNyvpJeNDSiLphMvXOIwyiu5Z3T3Wq/ipZuH2A/M/ft55j6n7IVdgUwnmvroTSypRF/w/prqGpsIfALsoOYKFjjPmPWQfKtWzm/jAPR/de7+pmTP+zPm7ngLLw2ZQhRy9QrsuVbJ+NTt7Xl39m9u/QYY0JpufFBXYARiCYkJ70Vz1by675ALXMmXZ2rZ1d0gErD/3Xw7su2nha4CN1Hp3eguw+3K7IG0QUjE0pM5imXxpaWMIc8C8qSTFnE7s8HQAUsgAYXPsrUdwEqQZC4olQO4sTD7awWZUoIeGnd1fPNlhbkej+ZEvM/eAQrChUcWd7Ayg8SbnmH+DNbl1yoJcncRYmG01Go4WPLZLNFvy1M9sR1FtHGuqIi7qbCMB7m5mkhzClL4dczC6jwtWcGk4GvO2QVu7fDAocrJgGq7sb1yp4bCqEFITmtZ7hjo2h5539vY/33vfPyyt8JR0lgzZQM899596zK6to/nFpUFmcIIl/OpOY0ijmeXFBBgIIzXeIqwONmmpbbcaR44u/1NryNzyvE71rMV5pLK+2U5Rv+K0s3QEYF1V9YAViIBUlrg74UGCyNL8qAGsAhoDQPcABKCpFGa8aojEBgwGAfJuq4QsK1Z8QR4gBRbPSlNmpcKYOFEco1oK3owoV+McNpEDa2o3pIgu7t+pIx8bTAJSzgRlkEAbOyCcnCcAkFPu3m+RCDAPDBkEEFTPemOtj2qOeqFlXJ8YU7Vc9x2CFndq9mfPfsxXlm4sG+Rklys4AtB4ev7c1hf1z06D+eVqnZwBGYDoMIQQIqxhSsXtIUKx7V2EVlJeappQheyFFYBysEy2UM55JoSZKqBJp5+AYKcccxWNdABbCYQ2ybK8kGXLj4FwZ26atjmcHfBBADwiu9RlPweSIZlF0lBCjIJEdyBneJsDspmJEaJ5wWWLNyhIcLlDme6EEzJ5Mg5j3VfTVu3A4ih6VDYJcCJD5U4HOQohWe6nUZAv90yB0c1pMkWkHtxID0a6lKUsZCCTnujZLGTLFqIrAK0lF6BKitlCT+bBcohVzr2cY64Ptc0zt8z+o7m+pJkOCqHMjotBigiwvggKNRBgqKC4nvix87evbweDrCrJukkQrUy2O3Mxvqmm4DMixMiQVuAHkioX4C3yBMGeqIioqt/32QCIcDoE10PH6R9CeOx0lFWZlNkYzEAePUdyh2DQqG1WcgKRie6U67x2WCBqIITAYDCKlJUfyeBWtahzptwpUdncLWdLbp7ZZiYPdKs8RLeYGLJFWt3LMwTp0XyGqs1rR+WwjOAM3u1/MyIFbwxCMJE5mbzcl83aaAgyCIhkBAIQhCAFOii5oYlgYADkcMIYTCQUCVGj6DAH3GiDpglqf+qCXRuAhqwQIAEencelOGYgFWQ9IzhFNsov2Lj5qo0bjuQVCi1b5hZwwqlsVDCFQCPHIByFkk9PUY20lLO7u3Ss6UQiMFYVZ8zGqcdnII55SpDd2KqpYxXKltHRJqckdzQ5r6TUJd6PIZIJOFM4QDSa2apJDrTBmhirlGMaJRs11rrEtkLTY9tj07PUZ9tHCrnTJyqrW1k1gzgIpFlwyT0xt8hwl2e4Qw44PfebkUnDOmRaP5sFKeQoj26tbIWgp35OMoqQ0aksT8pKWbl1DJMNE3MGYJFQybllB3mBDi+ugKuWpVF+xvotP3rW1iQ5q2IxhuPFTcwhy22QiVU2yhLSzoBrd+zaOEwIhRDqXVL9BAOhgRbMjipXQAKODKyMmtSZrzoGyjcZIkO/sDKLYD4CtJnj+wcCgH5VB5FAMHNhbJisvnPkGhQswFUo+1qbQjGBUopHRlKCKQf3yshQMQbSKrHtyZUkl6tDKR0GFsVOMgTrBVilAK+iajlB0hwMRa1KchdFZ0DlLXIwmlHuAZke22zOmAI8VwoztGhdFlEhjkNIiLWz5zbXcB3MgBydGSGYdW6+l5wsl5fIiJHRUTfLP3H+eZ84Mr/fkwlwtFM5DJMzJYAQPEg5ZMYcckz52rN3XjTXX8pLUTYi6+wwZRbQFg5YsT84gZgn/p4zQMAgZR97QIUXPvlcUhmIYN84RvNB50RznSxocHrGO0Gg4visHz95zRhojdQUt72zLY4Da+so6JWqkyTdIR9Vc8yxdgUXrHV1eQHqxLPsLJI0g2X1me7RKGTuA2ZDyG7FTS2pUtkLhVWZllyPjdWMcgrZHc4AQwqwlKrkZtV8FfZViDF2Pr+UU8o5J8WAGDxszP1Rth6QcwpkMAsUPZe8q0L0EOQEBCNWlK6Y3fTSHdvfvft+0EzyoG4Zj57XMdQbCPjTev0f337usq+I6meLZmIOOacQOIlirYmxFsepc6/LNXR3mOQGZVBSOSW6MAlAoEYXOpiOSjzSXmGpT1SFuHq0kWUnTAm4JaW25E1ojEqtQe+PQXkJCDmGO0z/7sabb3PWinW3/JRDnArIARETASMBGuaJRe//6g03zQqZIUG1K3PV0CTQSufA/u0VV18cfeQjoKo8SkyWUkzVILHqf2b+0H/ffddKVWHsRpVHBCBDDTmLcAS+0g/MpNwmyljygmAX9vl4gjIrHw1fvnPb5/Y9cEMTI6KwouMYWHSTCT1oIKzL/rMXPW5nv7+3HcyOTAhwpFDk1zqVtWqbPAjDBhilXFIsuPYIMrOy9YxWm3G1HsS3Q7DYKVP1CUcoVqSOcqYFU05AIx/r3zxtVLgLxT7y8mWtQyfJCtZj3As7PC5NAORJ+aPjsJI0EckyCrsvewdCWIkTHjVLaqNSZUnIosGDR5cxArAUwah58680KTVlyVZDVWFiTCkBDGbBoVjsZI0F3jsEbjXYp+jViqXHqH3lBRe85Zu7W0PtyELmmlV0lMBpOaKaazZv/oHtmwajUe0hqNj1bmAyWub4nBJkkDiuWFRguYKDltBPo1ySUn1M4tKUTUwgSBWpwuIc47IPi2A9RIiagCM4vAdvURVOlRhW3yWJMuQ2M7mXUz/ToSAU9AcuwUkPkEpUoYgCSZgqzyAoNw0cYubxsqV1bKUGksIiVUaSS8GkY3QiZhwzaQSL8D44SshgMIk5NDHMWtrgIhBCITqtGrPeqaXJ7lAmWfIk0e0QyjqhKvhL8dUEzxiqec62nR85uPyRwweMyOPRrcoWnS4QA9PZwssvvLDnS6MkE9sKnjMkeYg0Fcu8YIfmdFE2DkG5QBEuC3JAjZxScMo45vhyjDiCLlOuQwAYsonwk8/9nrzhdPhYEFSh0AaSxnk7U8aVERSLWdTB8RMvZOzJKOXsU+GFaXJf0U0aK/npnwlLpEP5j70Bx3/92NumsZmibM1ooFmwYI4uOvkgT9AxYl68FD++V8W25xpYryf/2Qt2bTENGRMplvmcRtpJVMj+U9t2XDm3fpQsWixDtbEh1WUVTmLIUoZ8DB5zqshfF5x2d0wsr+6aTHsmKMxUFeBO6fQg0tPCsQDMAOvMkpxr9eaYjAYZWo1j/GP8a3Jbck85lfDftL4pkvfIJMtoKnwzsZ1JGs1oJ+oQSZ0Ijt3VB7EfHIaY+6kZPX2u+idbtsm9fMpEEMr/nZbhl1Txn5yzPSzPM9sqWjmWi+Pgltn9qOFO/aN1dPLOtSvVhblo0qyFIrE4vRqL9i0124NirASA9eB6Y/Zkco2t5zVa0WKjUmOUnaFS3LLuTJl4eB1qtzpfnSGstcb+cQ7oB1v4NSjG8Y3ENQ/nKjJY4geaKB2tnY3jP21yZ9EEPBrS64K/QGzpkgaLL99+/q5oLi+hvWIOdoiBuSm/4pzzdwQs5RW17jlP0dAwFfacOkbkuQuqYaoqm0QBHHnOYoFQV9M8J4Fod7Z5c6gInH7S1OklKEqbYrU+xJyakNX5TXBwshVosWpyTgDsOOLvkqOzMTUVE1Xh33gRVuOx1zTPc3wV55knoauKaBW/auro8jHT9yQVpkOuVZ2xytMZ6wnB6EhsszTIOn+290937qylimbTS6lKWU9f13/uWWel5FlB3hYAYO0sjOsTHBcJ0pRfI4AcNkk04ZhY5Vi6Qutnzc7W3RScVvbqyb13EisgGGCQb59bt7Hui7JCXpSmVQyNNFsaDgtbkcfiV2v5+FPIOzM5krdtkqcsl2vi7Ze4xOSne8W9u8HCSZ+EnIAVUzED6WQOA04kcyJanRlv1lXe68wvtUzmEOp5G770/HOeNLfJpdDV8YAMLm6kvfLc89bnYZvR84oqmoggImlTmw3HMfKOy4C1pdRkIsRw7NeSZCCyb+3PrjPTJAuBxyfTnjGvsLijXHXfSVTE4OKNM+scB40h5JnMPME/Cn9GCNS9aehgkMVCgYdhTCwIQABTKZs5diXNjECDUFd4+VlbD9bRg9EZs5zqODLsxiSYMdZiG5KRX59f/vuVoXKrb8kBFjKZaJVzhTARUjIa6dkFTjKguBaXe4hdVzyYzjwRKvmwYiVzqgbluSEqWKU423KppxXl8znzz3ZdcPNNNywxUhkUrDJvXnTWtqfPnjVKCwphpkWmMbNBrqONJKIKgfAs7wzwyUoVon2xLdRlRJRsVuxVXsw8JypZQKagUPwMIAhgXjK/0KrH1L2Dw0Fl1iJ3GAsn4BH9xNR4PFFNZcYMwt2kkOHIxIzj++Y2xVFaL3hQ7jzuzjo00Eh3292OACPYGIpVwynXeqIhJspKLidmm+Elub34gvNTr0KMVWZMLrbJc2fEFIZpiMbZGmEUh+xXf3rH/bfedtsyTyKGytMjQj/UyWgGglIftpSTMfSTRtGTmQFG9DOa4ejpWzZ9/6ZNHz1yJFhw8zrnHcFedv5jZtrUlriKMAqMQI8+j9kP7bnjhTvPmakCBzYhKk7Vsj0Gbh0zhfbnfFDtBbFqvfOnxrWqAaCh6tZ3VvbYrZv+7r5B32Mp+FJ2VVEZ+YQnxk5q+mOpXuToO5nT1XNzV/Q3tDlVzuDMxsxS9aojfNYWF1rcvbwCiMweS77NdPLDWJ+7MCbCyB3ZR4HzlS20abTStvMro6WllcHywoovDbk40MKyL6xoccCVlWa4fHiwcGT58MLywtKi8vJ3SOWarsw9APQZ7xos/e2RQ/0wFyHVamoP0pyHVtkGiy/fef5ZZBJpAfKX7Dz38l4/a2im2g0eE809zcTwN4cOfnp5WPWDIcvCWrLugy4yJQPnhTuGy6GKjuzj/dxZF1IBpVMe/siGzVuB5eC1okBHAEIoG99O9Dg8Ia+Qriq5m0ahiqrWe92K5wi/cO5jN5iv1L5ck2sfVWiZCHZXm+9v23EEq9zkE5VgxmDBiiEy7edIruicA2agnlt/FHrDqkYQzc26P808Bw5iHIUKVlmqodpPUlcdxUvu+KWdGjjRaujH+qeFYFuJLm+kQ3X/v+154G76HKqZloGMZMhowZU8fHJ/9ke2bINScj2m3/uxc84zH4xqb4MVwDO4z8oe8PxH99+V2ZtNCK5UKInAMY7N2oIeboRq5ATctLTksNiVttU0xBPEFGxF7Q/3N71oyxb3tg3Zozwik4KZjmIXnHbCaqlhNSvWQlNpgc064jWPu/iZM+tHvpIjvaTQSUXxuLvDnciGLywdPphVmWUIudA83MZo6aSEpKnoQhlgLghRqc4rFQYVh+RQHMgGwIgaAQ3QACOiMYzEodvAOKx9pa/mFCJck9pdp+cir0VLRAk5ZfecpDrO/EPb/tX+3Xl23UyKNUJDZTgzpGAa/vTOcy4OsU75FRecvyNq0dscAhnbYDl6LWdv9q/2Hrq7SbVRQyHBJhzYMW5SwIpjQ7pOp9yALy/MHxCjwlFARbEKPQRTSHn484+/+Jp16zy3tcvMLYocx2R1po5CMrsatxWp9XZjTs+ZW/87T3ziy7afndKShxTkW4bWUgIqFXYV3ZGohPzFQ3sdoOdMr0pvnUL44RgdX7u9xq+AEukiE40KdQp1ilIt9rs/2W9Rh7bqj6I8ZAWgCqeUYKK11sYpi9VRRk4C2oAoBXLLqLKKf7X3vhtHi1V/nRhWmBzea9FvZ5Y0uLCvn9p+3g/OrPvHW7aGhQW0NjOKM6lqqzCqMWt+Zx79+f4DBAahPVIFOoKyVnU8HqzqZoAUkQyk3TJYueXwPBE9u9ZmS0jObK3Vy5bOye2/feLlr91x7tkyb+Qp5w7wONGjMB6/JDqNKqiarSOeOtOfoVUzvfPXrbt6dsPVs3PbjSsri00EE6MCTWaA0EaPHmrlgbUVZr82ar8+vwggySF6SQjVagk/mhnN4O0YjSiUcwgNgxiotpe8CZXMZlNxcNihT8WFdDQhDM1mk5ulEaVvxSrvsOYJ8sSSWoq8BnFmgRX5rZzlMZWu81qgVSw703uIZTP1o8/Q7nT8+b0PXHLR7EzTLLEvl6mlWUR0+fO3b3/atq2zbQuPIcOZM2GMKSiE3p/v3nt725bwdA5CCoXxxXF01cBAGid5vx1/ZmJx16gG3n76wN4nXnS+t2lDU630aNmDswlmjKSTOYht2+yw+IsXP+EfnXfe5/btufHwofub0VDaD19qnSfgG8UHnXwAlBxbetW/fPL37jRLw2YmSU2TmpUjXX6WRa9ALNcl7YGmHGRtcEeOqD/+wH0HBJJZgit3LBKstd/X4Mc0ltBhzFaJea4348HruomMI08RGpsHJYCCJFjNWPWG1uvH/sqgAtoT1j3OYvGJGhssghnXhBJPmFF7VIQuQDExRyIgYSRHtN6H9u//0e0bn1nP1o2lwIhh4iB4RLKNIW0GRk07CDFArXkbvAfbENf9w+Lh/7FvX+mBVcv6KWWaZFAaW65d2MBWMX+uEqs6dpLA+PHDB3+k2XEJIeS69WHlJKObjDKP3pCWQ5XaJjYHnonw9G3nLWw7d2/lIc5ef//u37rjttzl/5wy3FDMICEvN31gMBg12WH0ENxociuLPBEUIig4NYRtShv+ge3fPLD7uCmgPmXceEmfmNLJZS6qGPam9v333t9YXaL0tdzpE3UhKUsUMqIYqpxQ4abhyE+RUbuqe86IV9mZ/+NCEhKyVOX2MP3d9z1wyeMuW++Ly7W3iiaIcLjnDmHO1kQFeh0w6oVR1Mb37N7zQE6h1EWUDJJ57iovrAbEjr/GikmpNbknxnhXmz907/1PPO+CjAGhHFS79T2NzHwSwnKHMLS8wpZNUzl3IM6F3nlUANIkDf90cKwohCaROSAz0EnRutNgHPTrEAOyrZjkfa+aMPe7u792LxTB9K0WytespgqqDGJ/hf+298ChtZYLj0mLP5qSFkA/OdnoyuKoi5m4u8CxBjtFe6sDJ4PlSSYcMGIOZp86svChffv+6ab1o3YxxA2UXLkgLy6JDPAMy4iWBuuq3scWDn78yEK2UGQ/goEUfarWzNoeBWtXXR2qmAExZw/xAwcOPHnrtmfPbTqU52dzqJ2jqpBsULJ9Op63rMqEWAttTit55XBI6cQIgPZgL43NtM5daiKaCqOAlhI8AiVJe0K9EBQAS6poebb/ewt3ffrg4ZrR1wZvJmGHLjo6xrTFrhaECrBv1hPWJauD0XrGXjBjiLAIVrCK3Z+RZmQgK7LHEAOtn48JqR3jjT9oZGeSEHu8sqicoppMR6OntDI1PtgnHA2sEmzkgDmA+N77794tzvXXh2AuX6UISyX33w0tM1k/4PYH935zRcEYO08aNNpYw64ZzxhrGC9dR1uVJDgMiu4h85Dsd+++66to12Om8n6y/igED914u9AWZChZSxXFkGBtyPlEfSP7ljiPACe7uHxB2wxg7mgA3TJQUsgkbJ3F3Qvzf3nnPX0LdD60r1UyawqJvQurdnwV5oAUSppvAhuHw01IzlZoZS3QiqXPIYUkNCVzJX3bAdISfSfJVdXprnGGPwN5e2r/28G9nN0Ey+Na0i7vErqpQCF6i/7sXx46/NmFZQtgTuwUPEFGBZMdPZnuWgumAZC1lIfMRCRTQO6x+sZg8H9/8xuzxiR3oMqJ8qMAiEykisMeBpVExmzReVqCVWheRYO3lKA6hSoHigTM4CVPchK1JQxsCTeutKNd6za9YucF8jyKXGvPHjfqQB1TuY9kDtbGUowqjze+oEA3ujEHeqAXomYuhJQgFzzZSVlVpyg5D6L8OpZ7RxeVYAYgq8s+pswJt0Szv9i352sLizMx5Ci4hww3BCISsghHj9o/bP70/vszGJSs29wlLTgEHUVs6JSUryZvr3YVMDAiiKbAFL1Buqw389zHXzxvDdjG3FTehuyUwkTdyerMGfeey+FtVDIN7UTLMNlxI1yBEhUVgODMQcmFZMwRJJFgbgCcXtJLswMKFD1ld84uLlx7wTlP37oeKdWMobP1JCsZrJyARlneep4wQjtu+ficyY5GcFjJoXBkyMdnivs4BjRp79SZBifTEqY7pNj96VPpLmBXk0l60GrhU8SMkhsqI2hQSRInE2EOdwkeVYqvQVStam/iu++7Y0VKluCMyQZR8DZKIyZQeW7uL/btuXU0qhnc1U4kh8pmKUoGJx0mBoc5QoYNiw5cZcwQmU61zGSYSz2ZbVF+zcXnn9/vVwNJeWCtq6KCSSEnIrtRjEAYBoaETFsJqHPOSjoeV++EBKs0y0BAMgI+69bzWmFEawKzkN1yZoZEB7Iru6Qsh3tFA20+pujt6y984vkBDXPHASokbGUdl2q6Vgf4miHzOMJwFMH4tKDNNeDmhMFzSj6lrc1bX2URkcYCbXTkxYQqfGL/oQ/uO7hpNOtuCz1WbUioBowQYoy3rKz82YEHIkLLjjZyLA2aZsUxL9tyqsbT0TRSN1DIFBp/4c5znr7x7Gp+ULsJdEMmh8EaxqyauYLbyNJyNWptxdkQiXKY1cdl1Z3wUehjFhwAJdr+2f5Sb7ae2byu3jTbX2exQpAFC7AgmMNQCiW6lJ1ArNC23x9mX3jeeXL3YKKZGLreQZoiwXVcqKOAR4yJVg+vvTRxBo+GCU6R4sa1UYRxmBcaZ1kI8tJHHpn0lQp/dM999+RkhFvuJUVUrSHGEKqZP9u9e192MEreGbnHlO4qDrrGRLmJ63B0QjABMgBDtufG8JPnXLhxOVfJJ3lplMxdUEtzsXL1lWt6P9TrenMbe5tmqo3Dem6EiidGzIrH6cpHJIGZAcrQ/an5/97wd/3InbH/hNkNl23efOWmDWePmsXRYEBUMMLlGYEgW0LEbGsesnP44nPO/dC9997jTsJgpuxjVl1nx7kmJAdMlapyydzdtZp2cQKksZOKDGJcYgWIBUgzMnONUagTwEi16g8eHSOa7qBUPH4QsOKgIaScLN6a2j9c2PPmXRfNLC/kgICQmWNv9vMLix87eIgMWRK9JzRdPj2ylHOWSjXKqRlQRyQ8ztKXMAdM3v7gzrMvnemvLBxSjSw6LMhNPpvRxNzGRGftnLMaVe/eFp8aLH1h6cBdg6U08LtGIy+eyCkh7xIYEEqCzJD42mgYh/gShh+cP9zfe/fT5ta96tyLLp+b8eESGMxVQhiZgsEUK8co6LANL642PHXj1j2HD+RgnSW1SrxaPUA0xhm0xubEI+jereE8n0oOByfH6DjgNMWNIK24upDD5WALmKtytQwf33PgJ7add5XNLORUpWpzDIcY33Pv3YuAMUrNuHKpjlqkjogxVf/8eD64Cg/QQJfPCs/ZvqOn4aGQaAHOkGno7FLKzROcK3H2gVD91b33/NX+ffePRsurXOfAsjNOBccSCGYwGUTERAsh9yxa6LE3QvWphaVfuuWGTxzc2+/1WsiqwFAI+h6lKC7XUQ65R0+XnbW9X4SHyOXZa6gXCEYjJ4TPUpzuEccHpsVjuiaWTtzGmuRilZDjNLGZ42J0lNcuIKYQM0lkBu3L+pMH7v3m+np3L95d26E6/tX+e7+4uKhYS7k4562VHoSaMpxLotcYM7MH9VStuKNQUtox2798dn3jyzVVCT2wViDZVFipZtz6/RxmUO1j+Hc33/jbu++9rW1WrFezNwNaMHUg7akzSH0s7GSnfJ1ShoNmFg97/t077zxrXf8H69i2cqEShJ6Ck5IyYFXLRu3lM7PriIVcipnlAtIIueQOBLESpZxLYZoO2YKAXrZ+jiBLBdlQ3MOj0u9O+NR7MJSuyqxCklFembzOA3O6BcfAVGUyFRXm31LYRdDV0B0II/NZd4pCm2NTQyGFxqBMB0r3Di8hB1cO4QMP7P/ioUMhC2Ak9uXcgO55FVuiYKQikCCZ96IrMXWVc8Z5sQFmyIDBI9kU0MtEyl0Q9KR+f0NuB25RwUvVEqNKMUxL8NBXPDDT++3bbv/E4gIqsxZCbqGmg3hPFCWMDyZTXVt0su38biSiWJESgvEux/vuu/dpF12YHU7AFDw4KCgWBe3MrZ8T49aZ3v0rI4P5aqm/Li7QBrYVhu7BQ8fQmnB1DCt9ZQKZUcooVUvP3PEoGENQn2zd2FotNIktVROWxeBVnbMJJwYKkmJWhJARhlWwJLdoAQ5Fmac6O4CY2QI+Li5LCFRuwLtG+WhzuwAxYz8Z40pRbt5GNSlliNkm4DvNQoy9UpkBoWsRLSvrIxLCE2bXRfdRjsVU9zEzw0BYZoLP9D91eO/HjxxG6CGPfK1EnHhaWDwB4+H4miCg+tv5pVsG+XusN1Cbg1XFKdbqe5LnXl2f25/92sqoK8XHYkx11kAEKmfV2op5G0ChlLYnrR9sY87rsxYUQHc4TlJdncBXy6MoGWddtbKYG4OYg8NCHes62mAGODGuswipCoTNCTXYt0Aygi2iAykqoKtjeNwJ5TF0j+msoSJbZAZQASH4TKNItgaDgtFgwUIvViHWEbmkchowKZAsKALb+jOWcnA4ZGOEotvJ5CzsUC98bN+BhK4qzSnnF8ZT3e0wct7xxcXB927csIKmzsUj6by7ktniUg++q+5hTOCYVOvvmj5UvdHcejaRSGbJxABGGskeYz83NQAwIRra4Dqz4ZqKWuppkVFtC2bC6HCjGZPFw3W1UsNWh/6QswHUxKiO8w60qSxWTWSgEVOwoWFGWpjedkfzV7+lw1LaXiRnOFTN5BEym4Y5AJGsQoi0pl8dqasAJHMHUrYJQwXI62g7e7NMLdXR4CekLYJ0zga7zf1rKwPBuvL4eHgEa03cSdN117sqlTctLaYN24PQT2FYJzBMh3JdXiNvL0UHSjEQ0qjgSBQYP3N4//zXFzX0IDpRLMMAGAnTPqbdQcgi6DAi6yEHeXzS4oPBmeR+2Dtvum0DPEOZyGBwwdAXKbUW9rovRyr5Cegr28/wrhu/MecpQW0giEpdceIKGICHGBQITyc6yLWEBYNlRBi+PH/kl//uC7VLUMuumFQkjazNDqQ2IxYb1rPJHEIQM7Qu2maaoxUDVQotrwKezApR9y8tH86KCFB7On3+Tqc+Vgbs3sHKgX67cVh40akk6xbqRXGJ3duzql7RqTauAu10kVDvjuXhHUsrk3oFxzmGe6hzooJTmWdUXwlD2BeXFqcUaQQIS10LwJKSEgwnMsHCMNs/rKx46fRnACI8wUoToBwAWH/MWD6ly1LJWF1U+spggIC1vYu6OQyEMAsNTQgIban5S2RhJsTZEFpPyaIllbxMTVEvm15+YGGxEcysJUI+ddE6HcFyIB5qm71MW8GBZRdL+ey1xUh9Qx0j0FAO0pVLOS0gyMlIc0cfykLbwYwEwaBQI6w0I8CdGdNUgTNjYEloOW5+Q6EGKQ7ZAe9u4lFkgYcmldmI3pULL41MA9gITtFogHx4yl2aBGQDlWM2OI3WKhrSamXjcanqzBhasDNpM3wV5J0jI5UYNG7CMF2cyakm2KHUJrCrOvlt0ViiUXklY9hUDI28IWZKtGrtfdYz9YFWOVvPvAFKtqQyBmNlMZgygUupSCZ4RguhHSOoehC0XTq5OplT4HhHCSzo4hCJxgmyoOQn1b+HxdUThNI7KU9DYvlYY/zEw06TEwJInS3uUJOOwpJLhJrJmQg4WP4ChWK3bCNi5W1T93PyMTdizMcGjSH3lxsKLiamUsTs29BAQCRb92Gb0A8lZZZgoa1NkeBUhRDWqmx9Kwx8UvPzYedNlZS6EEim/P+G3sE6JqRjZDnO+yGEcd0wrRLFnADMBGVo2DalRx5Orwrp6TRpEmEJWEnJ2TOYQOEoqQJcYSIrxykv3qWqHtX5MuecH5FlLkTkYhGeCqnhO+wqk1noftMR/YIRzsQqwlwFuAlrBNElMkPLqcGxsc9HVmOhlOAcSW5Bpb3dWNlMUkALjm5WMnWOs70eTIDMLIRQoq3HiZRPpYeeuDN41OFiZu6+Y8eOa6+9FsAf//Ef79+/f6IvT1VVnFB0fE21lYc8IlcJxw85sPLbskPK3p5MUdc0xtULVsXQsD2GaklAcDTuyylPVXnlt0ewSCZh6OMKPWMFO01wojyW9gLjU1BTi3rxxRf/4i/+Yi4dE9xzzqPRaPfu3V/60pf+7u/+zt1jjH5MkbpxfZVTtFqmw86Szj777P/wH/4DgOuvv/4owTruWh5XXB56yY/GDk5yJxz1xY99cvnLzMzMjh07UkoPPPBA2a6T7e2dhwKSDDy2s3vpRdC4D7tVO13deRrG+7hsXFZpWdu1wZz+qmXywqSCqjRhX5nRHTt37nz9619/7MPbtv3whz/8K7/yKzfffPO0hTb5ewhBUkppcp4epfwmL06OufJeSeW9k5uHw+Hy8vJRby/ZDTnn8pyJcE/Ku02+Y865M9FSWi3tOnW+F6VbisW7e1VVmGqQdNS2KQ+f5MlM/7Y8s4y/vF6+YEqpjPCqq67667/+67vuuuuaa645cuTIGgd4DEuXEqs6Pg0CyXMjx3SSpB55jaVAUxZWNJrN7bxiKuXP1yYJmgKCVQGWUAo6lKKSZbpGo1FKaXl5+S1vecu+ffsAzM3NPeMZz3jJS17yohe96Oqrr/rRH/mRG2+6uYqh9GucrH35Swjd8qfk6GoGdsnI7quCUlZi8s8iamWBJ9tg6nykWSwiO31Yl4dMPnpy1XXdNM3kg8p4Vo22Msuxe2BVVW3bljsnr5SChxJiDCnlo5TZpH3BZEhlAGZWHhVjLB8aQtiyZcuhQ4eKzK3uhy5HmzArCQQWaoBZk/6sFGBsG7ehAORspBuVdSLu6vE0dzydg7B09hjmFLITlpmPZeVJCBb6pRLi8ez3GGPO+f3vf/+BAwfKK+9973t///d//8/+z//zsRdd9Pa3v+3HXvySwhEh8Pzn/+hLX/pPdu3atXv3ve973/v+5m+uJ/ADP/D9b3rTm++44/Y3v+lXmrYNwdx11tYt113363PrNrz97e+46aaber3ey172sh/5kR85++yz77777j/7sz/7+Mc/HmNXh3jSo6EsWNO0z3jGM17+8pc/4QmXDgYrn/3s377nPe+5//77i1j88A//8C/90i994AMfuOmmm97ylrdceOGFe/bsuf7669/97ncvLy/HGEMI//7f//uLL774rW996zXXXPPiF7/Y3b/yla+84x3v2L179wte8IKf/dmf3blz5wMPPPAHf/AHH/vYx2I0CSFYSvmqq678qZ/6ySc+8bLl5cFHPnL9n/7pnw6HwyKXb3/72y+77LLrrrvu6U9/+gtf+EIzu/POO//Tf/pPf//3f0/yrW9964te9KLl5eVNmzZ9/OMfr+v6Z37mZ2644YYQSiluAgqBoUO3ilzY2roKcqCdlFwG+W3KdwrRCOCNF5x/z/c+6cYrn/TVK6+44YlX3HDZFV994uVfu/zK8nPLpZd/8nufcsXcLABi3DGQjDEAeNrTnibp8OHDF110UQihruu6rmdnZwG85p/9vOe8vLT4pKuvArBhw/r//t//61Q5J0l6z3veXdfVrgvOW1qcl3TNNT8EsN+rAfzCa35e0q233rpx48azzjrrIx/5SHnLyspK+cs73vGOstcf+9jHLi4uLi0tXXrppSTM+K/+1b8q59dw2JSb77rrric/+cnla7/+9a+XdM899zRNI2lxcbHc84lPfOKss84KIfT7/RtvvLHcI2l+fr7c8MUvfvGd73zndA5CSumlL30pgF6vAvBLv/SGphlJWllZLjd86lOf2rFjRzkE//Zv/1bS/fffL2k0GpUbDh06VAb2vve9b2lpeX5+fmFh4d5777333nuvuuqqsm+NIVgA+JodZ9/19O+76fue9PUrr/j6FVfdeOXVk2W64fIrb7zs0k9dffWlM7Mo9YUQeQJG6oPlbNoJ5nM+aMQNGOacXNmzfMxgmLIxnaqB9YXwM8mnxKSYgCbqPefcji8z++hHPnrkyKHZuXVPeMIlAN7667/20z/9iq985e+f+9znXHrppS9+8YtuuunGn/u5n3/Vq1559z273/XOdwJ41StfCSilPDs78+pXv1ryt7/97fPz829729v+8T/+xx/96Eef8pSnXHLJJc997nNvueWWN73pTS996Usnp0wxpyS85CUvvu6665aXl9/4xjdeeeUVT3/6D15//fW7du36z//5P2/YsAFA0zQ55/PPP/+jH/3olVdeecUVV7zuda87ePDgD/3QD735zW8uR9Lhw4eLaD7vec+77LLLXvWqV+3fv//qq69+wxve8Gu/9mtPeMITnvvc5375y18OIfyLf/HGuq6aJj372de8853/cXl5+ad+6ie/53sufepTn/qBD3zgmc985nXXXVcO1skzX/SiF1100UXPf/7zb731ls2bN7/2ta8B8HM/93M/8zOvWL9+/b333vuUpzzliiuuuPnmm8dZ3Z1JPFvFAOUsWODawlrFAmuptpRDEog16U7Hysm3aFx4GoIVghmAV5199q1XX/3Vy6/62hVX3HDZ5TdcdkX5KVvh65df+ndPfuoL128EULEiS6VXFlP6qU99atl2u3btmpiu5Vdnn719z/27JV37ipfHaLvvvTun9JznPBvA7GwfwI//+MuaZvTpT3+SwMWPf9zC/JGlxYWLH38RyBc8/3k5pztuv23Dhg1bt27dv3//ysrKk570JABFHV577bVN0/zlX/4lgF27dh04cODIkSOXXHIJgL/4iz939+InluvCCy+87777JBXt8upXv1rSHXfcsW3btsk9v/qrv5pzvvHGG2dnZ2OMn/vc5yS97nWvm9zwnve8x93f+973Tl554Qtf6O633Xbb1q2bAfzJn/yxpF/8xf8VwMxMv3zu7t279+zZs2PHDgAf/OAHJb3hDW+YGPK//Mv/H3f/6EevL4v2rGc9Q9INN9xQjvjVBWUXuHrzrvPufcqVX7v66q9d9aQbr7y6/Hz9iqu+fsVVN1x+5U2XXfbhq6+8oK4BVKShnuYXn6ycnFYvnYLnDlIpHv6gllg/VpvrGWCex3JF3I9KD5+Yq7t27dq6davk999/39YtW9avX2+B//W//snYuXN3VVV96fd8z+ZNG79x2zc/+MEPvOLaf/rjP/7j/+7fv/1VP/cqs/De9753YWHhyU9+8vr1683swx/+cFVVE6SnqqorrriiQGXlo4t1vGvXLpKf/exnY4wx1u75rrvuuvHGG3fu3Pn4xz9+omxvueWW/fv313VdvIFPf/rTZrZz584tW7bs3r27LPzevXvLyTgcDvfs2UPy9ttvN7Ner9c0zb59+yYNJsxw4YUXSvrn//yf//Iv/7JZiLEaDofnnHMOyWKQlRkrz+z1eqPRaO/evWUfFhe7DMbM+v3+yspKUVfTQFUdTLn1XNNsio/fnSKBocl5lDP4bYUbCh4KYMW9FcFshDtXQRBSwCiEs6jtMzXIILamtQQJZbl3JddVKmONRiMAr3zlK2PVu/feu//+H77S7/XalNz1P/7HX+/Zs6eqqqZpFhcXR6PhkSNHRm0L4L/8l/e+4tp/+sIXvujTn/6fz3/+Cw4ePPCHf/hHJMvJFUJ4//vfPz8/Xwzh+fn5nPPevXvLr4ocFJGdn593923btqWU6rrXttnMtmzZQnIwHAKwGACcddZZIYa2bfszM83KypatW4vpMxwOJ2UvJx5iznkCFpR/TkILk/yLwWAI4Itf/NLNN9+8YcOG4XA0GAyOHDkyGo3uu+++idyb2erbi0xYmGZPuzznNKlAUQgRGYrAhqrviRkeWOGYlGaaBqO85B3KHeB+RgTrpMC68XQYgCOpHQhzyF3AqSucTJEiR8FmfHTubJgAI11aYSn9F4KTaRwVlMvMtm/f/trXvvaf/bPXkPyd3/ndI0fmQ4hf+MKXnve85+3bt/9f/+t/U8bQ7/eLDVvG8+n/+Zkbbrjh6id97//2v/9+r9d/97v/8z337q6q6rbbbrv11luvuuqqe+655zd+4zfKe7dv3z4/P18keCIHRbA+85nP/tAPXfO6173uk5/85G233Qbgta997RVXXNG27ec+/7mJZXnl1Vf9/M///P/x+//HYGVl85Ytr/mF15D80pe+dPDgwX6/v8bKnELDj0U7zSzGWsKnPvXpZz/7OTMzc7/5m781HA7LPWefffbevXunC7SO+UhaHTmJYMg+altBGzdt3Llzxx133NXFcwUyZGqGeYf13AOYzY8msZV6ZwPnsko1NwXltQ3CHkGAtKDp8+1oRb6eIbm6MoDjFHUQMxlNtB3rN/SJITPHqUMFyDLSyHXr1r3/z9/fDEeSqqq65JJLtm7dCuC3fuu33vWud9V13bbtdddd98xnPvMtb3nLU57ylE9+8pO9Xu/aa689cuRIAQNDCG3bvPe97/3N3/zNyy+/fDgc/uEf/iHJGOPKysrb3va2973vfe94xzt+9Ed/9Atf+MKGDRte9rKXHThw4NnPfvaePXvKChXUB8Af/MEf/MRP/MRVV131yU9+8vrrr9++ffsLX/hCAG9729u+/KUvTb5+0zS//7///rOf85x77rnnWc961pOuunphYeG6666bDjRNt42oqmpiPk4bzkUDkXz3u9997bXXvuQlL7799ts/8pGPLC0tXXPNNZdeeukP/uAPfvazn52AZNPP9LF4ecohhFtuvuW++++/4LwLPvBXHzx08OBv//Y7P/jBD1ZVzMmQ2611PDf0sg9qsvLUBI1lvcOrQwhLechOGk83/n+asUIQdjDlQ57PIZNRBrOubQK6IvocuXbOzJ5fhdvaFGRuU7wq94X5BUFPuvrqYKGs7sGDB9///ve/+93v/tjHPlaAxBjj5z//+Re84AW//uu/fs0111xzzTXlzPqTP/mTsrmLTLzvfe9705vetH379g996ENf+cpXQght21ZV9f73v/8nf/In3/zmNz/rWc961rOeBeDAgQN/8zd/UwD3csq0bVvOmt27dz//+c9/5zvf+dznPvfVr341gD179rzrXe/6zd/8zaqqmlFThONrX/vaZz7zmX/xxjcGCwI+97nP/cqv/MqXvvSlAsuVp5VRTcQopTSBUssrTdMMh8NiX+7bt+/HfuzHfuM3fuM5z3nOq171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" alt="FTM Development">
-    </a>
-    <div class="footer-dev">
-      Desenvolvido por <a href="https://instagram.com/ftmdevelopment" target="_blank">Fabio Takeda Maruyama</a>
-    </div>
-    <a href="https://instagram.com/ftmdevelopment" target="_blank" class="footer-ig">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
-        <circle cx="12" cy="12" r="4"/>
-        <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/>
-      </svg>
-      @ftmdevelopment
-    </a>
-    <div class="footer-copy">© 2025 Rifa do Estiven — Apoie Nosso Campeão!</div>
-  </div>
-</footer>
-
 </body>
 </html>
